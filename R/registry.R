@@ -4,7 +4,10 @@
 # returns an integer vector of set labels (1 to length(sizes)) with one entry
 # per row of `x_scaled`. When `group` is NULL, the label counts must equal
 # `sizes`. Methods with `native_group = FALSE` never see `group`: the driver
-# collapses groups to one row each before it calls them.
+# collapses groups to one row each before it calls them. `check` takes the
+# options and errors on bad values. The driver calls it when it doesn't run
+# the method (when there are no balance columns), so bad options are caught
+# either way.
 
 balance_method_registry <- new.env(parent = emptyenv())
 
@@ -13,14 +16,16 @@ register_balance_method <- function(
   fun,
   options = character(),
   native_group = FALSE,
-  package = NULL
+  package = NULL,
+  check = function(...) invisible()
 ) {
   balance_method_registry[[name]] <- list(
     name = name,
     fun = fun,
     options = options,
     native_group = native_group,
-    package = package
+    package = package,
+    check = check
   )
   invisible(name)
 }
@@ -61,7 +66,7 @@ check_method_options <- function(entry, options, call = rlang::caller_env()) {
     return(invisible(options))
   }
   nms <- names(options)
-  if (is.null(nms) || any(nms == "") || anyDuplicated(nms)) {
+  if (is.null(nms) || anyNA(nms) || any(nms == "") || anyDuplicated(nms)) {
     cli::cli_abort(
       "All elements of {.arg options} must have unique names.",
       call = call
@@ -94,11 +99,13 @@ assign_balanced <- function(
   call = rlang::caller_env()
 ) {
   run <- function(x, sizes, exact, group = NULL) {
-    if (ncol(x) == 0) {
-      return(stratified_random(sizes, exact))
-    }
     rlang::try_fetch(
-      rlang::exec(entry$fun, x, sizes, exact, group, !!!options),
+      if (ncol(x) == 0) {
+        rlang::exec(entry$check, !!!options)
+        stratified_random(sizes, exact)
+      } else {
+        rlang::exec(entry$fun, x, sizes, exact, group, !!!options)
+      },
       error = function(cnd) {
         cli::cli_abort(
           "Method {.val {entry$name}} failed.",

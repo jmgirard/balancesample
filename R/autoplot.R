@@ -11,15 +11,12 @@
 #'
 #' @return A ggplot object.
 #'
-#' @examples
-#' if (rlang::is_installed("ggplot2")) {
-#'   library(ggplot2)
-#'   set.seed(1)
-#'   folds <- balanced_vfold_cv(
-#'     mtcars, v = 4, balance = c(mpg, hp, wt), method = "rerandomize"
-#'   )
-#'   autoplot(balance_check(folds))
-#' }
+#' @examplesIf rlang::is_installed("ggplot2")
+#' library(ggplot2)
+#' set.seed(1)
+#' folds <- balanced_vfold_cv(mtcars, v = 4, balance = c(mpg, hp, wt))
+#' autoplot(balance_check(folds))
+#' autoplot(balance_check(folds), type = "energy")
 #' @exportS3Method ggplot2::autoplot
 autoplot.balance_check <- function(object, type = c("smd", "energy"), ...) {
   rlang::check_installed("ggplot2", reason = "to plot a balance check.")
@@ -68,5 +65,6 @@ autoplot.balance_check <- function(object, type = c("smd", "energy"), ...) {
 
 unclass_balance <- function(x) {
   class(x) <- setdiff(class(x), "balance_check")
+  attr(x, "id_cols") <- NULL
   x
 }

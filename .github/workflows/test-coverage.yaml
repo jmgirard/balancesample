@@ -12,6 +12,12 @@ permissions: read-all
 jobs:
   test-coverage:
     runs-on: ubuntu-latest
+    # Usually 2 minutes, at most 4 for a successful run. Like the Ubuntu
+    # release and oldrel checks and pkgdown, which also get 30 minutes, it
+    # runs setup-r and setup-r-dependencies: one coverage run spent 14 minutes
+    # in setup-r, and one Ubuntu check spent 11 in setup-r-dependencies, both
+    # on slow downloads.
+    timeout-minutes: 30
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
 

@@ -76,8 +76,7 @@ split <- balanced_initial_split(
   mtcars,
   prop = 3 / 4,
   balance = c(mpg, hp, wt),
-  exact = am,
-  method = "rerandomize"
+  exact = am
 )
 split
 rsample::training(split)

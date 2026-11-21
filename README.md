@@ -28,9 +28,8 @@ balancesample fills this gap with four methods:
 | `"rerandomize"` | Draws random splits and keeps the first one with a small Mahalanobis imbalance (Morgan and Rubin, 2012). | none |
 | `"interaction"` | Crosses quantile bins of all variables and stratifies at random. This is a baseline. | none |
 
-anticlust and twinning are suggested packages. If you select one of
-these methods and the package is not installed, balancesample asks you
-to install it.
+twinning is a suggested package. If you select `method = "twinning"` and
+it is not installed, balancesample asks you to install it.
 
 ## Installation
 

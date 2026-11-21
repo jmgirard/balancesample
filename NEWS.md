@@ -1,44 +1,53 @@
-# balancesample 0.0.0.9000
+# balancesample 0.1.0
 
-* First draft of the package: `balanced_vfold_cv()`, `balanced_initial_split()`,
-  `balance_check()`, and four balancing methods (`"anticlust"`, `"twinning"`,
-  `"rerandomize"`, `"interaction"`).
+* First CRAN release.
 
-* Workflows with a postprocessor that must be trained (for example, a tailor
-  calibration) now work with `tune::fit_resamples()` and `tune::tune_grid()`
-  on balanced folds, and with `tune::last_fit()` on balanced training/testing
-  splits. The inner calibration split uses the same balance columns, exact
-  strata, groups, method, and options as the outer split, without twinning's
-  `strategy` option. This needs rsample 1.3.1 or later.
+* `balanced_vfold_cv()`, `balanced_initial_split()`, and
+  `balanced_initial_validation_split()` make v-fold cross-validation folds,
+  training/testing splits, and training/validation/testing splits that are
+  balanced on several variables at once. The three sets of a three-way split
+  are balanced in one pass. Columns in `exact` are stratified exactly: each
+  combination of their levels is a stratum, and its count in each set is its
+  share of that set's actual size, rounded up or down. `group` keeps the rows
+  of a group in the same set; then the proportions and the exact counts are
+  numbers of groups, and `exact` columns must be constant within each group.
+  Selected columns must not have missing values.
 
-* `labels()` of repeated folds now combines the repeat and fold IDs, as it
-  does for `rsample::vfold_cv()`.
+* Four balancing methods: `"anticlust"` (k-plus anticlustering, the
+  default), `"twinning"` (data twinning; needs the twinning package),
+  `"rerandomize"` (rerandomization on the Mahalanobis imbalance), and
+  `"interaction"` (random stratification on crossed quantile bins, as a
+  baseline). `?balanced_vfold_cv` describes each one and its options.
 
-* New "Get started" article that walks through a full tidymodels workflow.
+* With `method = "twinning"`, only some proportions are allowed (for
+  example, `2 / 3` but not `0.67`), and small strata are split at random. See
+  `?balanced_initial_split` and `?balanced_initial_validation_split`.
 
-* `balanced_vfold_cv()` and `balanced_initial_split()` now reject unknown
-  arguments. If you pass `strata`, the error tells you to use `exact`.
+* `balance_check()` reports standardized mean differences and the energy
+  distance of balanced splits and of rsample's own splits and resamples. For
+  objects that don't store `balance` or `exact` columns, such as those from
+  `rsample::vfold_cv()`, name the columns to check. A three-way split is
+  checked as the validation set and the testing set, each against the
+  training set. `summary()` gives one row per split, with its largest
+  absolute SMD and its energy distance. `autoplot()` plots the result with
+  ggplot2.
 
-* New `balanced_initial_validation_split()` makes a training/validation/testing
-  split. All three sets are balanced in one pass. It works with
-  `rsample::validation_set()`, `tune::tune_grid()`, and `tune::last_fit()`.
+* Balanced folds work with `tune::fit_resamples()` and `tune::tune_grid()`,
+  and balanced splits with `tune::last_fit()`. To tune on the validation set
+  of a balanced three-way split, pass it to `rsample::validation_set()`
+  first. To tune on balanced folds, attach balancesample with `library()`:
+  rsample finds the function that made the folds by its name
+  ([tidymodels/rsample#619](https://github.com/tidymodels/rsample/issues/619)).
 
-* `balance_check()` now works on three-way splits, including those from
-  `rsample::initial_validation_split()`. It compares the validation and
-  testing sets each with the training set.
-
-* `method = "twinning"` can now make sets of unequal size from whole numbers
-  of similar parts.
-
-* With `method = "twinning"`, `balanced_initial_split()` now checks that
-  `prop` is a fraction twinning can make before it rounds the set sizes, so
-  the check no longer depends on the data size. Before, a `prop` such as 0.7
-  could pass on small data because of rounding. Write `prop` as a fraction,
-  such as `2 / 3`, not `0.67`. A value within a relative 1e-8 of a fraction
-  counts as that fraction.
-
-* `rsample::internal_calibration_split()` on a twinning three-way split now
-  uses the nearest training share that twinning can make (for example 5/6
-  instead of 14/17). Before, such shares gave a warning and an empty
-  calibration set. That still happens when the training set can't be split,
-  for example when it has fewer than two groups.
+* With tune 2.0.0 or later, a postprocessor that must be trained (for
+  example, a tailor calibration) needs an inner split of the analysis set.
+  * For balanced folds and a balanced training/testing split, the inner split
+    uses the outer split's method and columns. If it can't be made (for
+    example, if there are too few rows or groups), you get a warning and an
+    empty calibration set, as in rsample.
+  * Through `rsample::validation_set()`, rsample makes the inner split at
+    random, so it is not balanced and can split groups
+    ([tidymodels/rsample#620](https://github.com/tidymodels/rsample/issues/620)).
+  * `tune::last_fit()` can't train such a postprocessor on any three-way
+    split
+    ([tidymodels/tune#1213](https://github.com/tidymodels/tune/issues/1213)).

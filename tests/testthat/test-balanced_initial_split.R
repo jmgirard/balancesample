@@ -183,3 +183,11 @@ test_that("small and extreme splits don't depend on the seed", {
   )
   expect_equal(nrow(rsample::testing(s)), 1)
 })
+
+test_that("grouped initial splits need two groups", {
+  d <- data.frame(x = 1:6, g = 1)
+  expect_snapshot(
+    balanced_initial_split(d, balance = x, group = g),
+    error = TRUE
+  )
+})

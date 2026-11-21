@@ -12,6 +12,11 @@ permissions: read-all
 jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
+    # Most runs take 2 to 5 minutes. The slowest successful runs so far took
+    # 4 minutes on macOS, 5 on Windows, 13 to 14 on Ubuntu release and oldrel
+    # (slow downloads in setup-r and setup-r-dependencies), and 32 on devel
+    # (slow downloads, a cache miss, and packages built from source).
+    timeout-minutes: ${{ matrix.config.timeout }}
 
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
 
@@ -19,11 +24,11 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: macos-latest,   r: 'release'}
-          - {os: windows-latest, r: 'release'}
-          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
-          - {os: ubuntu-latest,   r: 'release'}
-          - {os: ubuntu-latest,   r: 'oldrel-1'}
+          - {os: macos-latest,   r: 'release', timeout: 15}
+          - {os: windows-latest, r: 'release', timeout: 20}
+          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release', timeout: 60}
+          - {os: ubuntu-latest,   r: 'release', timeout: 30}
+          - {os: ubuntu-latest,   r: 'oldrel-1', timeout: 30}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}

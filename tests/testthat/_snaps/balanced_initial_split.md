@@ -29,3 +29,11 @@
       Error in `balanced_initial_split()`:
       ! `prop` must be a number between 0 and 1.
 
+# grouped initial splits need two groups
+
+    Code
+      balanced_initial_split(d, balance = x, group = g)
+    Condition
+      Error in `balanced_initial_split()`:
+      ! `group` must have at least two groups.
+

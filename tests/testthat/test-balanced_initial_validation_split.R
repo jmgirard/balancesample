@@ -72,7 +72,6 @@ test_that("validation splits keep groups together", {
 })
 
 test_that("validation splits balance better than rsample", {
-  skip_if_not_installed("anticlust")
   d <- sim_data()
   set.seed(4)
   s <- balanced_initial_validation_split(d, balance = c(x1, x2, x3))
@@ -163,7 +162,8 @@ test_that("bad validation split inputs give clear errors", {
 })
 
 test_that("validation sets work with tune", {
-  skip_if_not_installed("tune")
+  # tune 1.1.2 is the first version whose last_fit() takes three-way splits.
+  skip_if_not_installed("tune", "1.1.2")
   skip_if_not_installed("parsnip")
 
   set.seed(6)
@@ -222,7 +222,6 @@ test_that("calibration splits of a validation split balance the training set", {
 })
 
 test_that("twinning calibration splits use the nearest share twinning can make", {
-  skip_if_not_installed("twinning")
   expect_equal(nearest_twin_share(14, 3), 5 / 6)
   # 1/r is not evenly spaced: 7/17 is nearer 1/3 than 1/2.
   expect_equal(nearest_twin_share(10, 7), 2 / 3)
@@ -244,6 +243,7 @@ test_that("twinning calibration splits use the nearest share twinning can make",
     2 / 3
   )
 
+  skip_if_not_installed("twinning")
   d <- sim_data()
   set.seed(9)
   s <- balanced_initial_validation_split(

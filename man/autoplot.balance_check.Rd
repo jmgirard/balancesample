@@ -23,12 +23,11 @@ lines at -0.1 and 0.1. \code{type = "energy"} shows the energy distance of each
 split.
 }
 \examples{
-if (rlang::is_installed("ggplot2")) {
-  library(ggplot2)
-  set.seed(1)
-  folds <- balanced_vfold_cv(
-    mtcars, v = 4, balance = c(mpg, hp, wt), method = "rerandomize"
-  )
-  autoplot(balance_check(folds))
-}
+\dontshow{if (rlang::is_installed("ggplot2")) withAutoprint(\{ # examplesIf}
+library(ggplot2)
+set.seed(1)
+folds <- balanced_vfold_cv(mtcars, v = 4, balance = c(mpg, hp, wt))
+autoplot(balance_check(folds))
+autoplot(balance_check(folds), type = "energy")
+\dontshow{\}) # examplesIf}
 }

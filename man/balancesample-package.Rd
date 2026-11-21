@@ -6,7 +6,7 @@
 \alias{balancesample-package}
 \title{balancesample: Multivariate Balanced Data Splitting for 'rsample'}
 \description{
-Creates training/testing splits and cross-validation folds that are balanced on several variables at once. Numeric and categorical variables are balanced with anticlustering, data twinning, rerandomization, or crossed strata. Categorical variables can also be stratified exactly, and rows from the same group can be kept together. Results are 'rsample' objects, so they work with 'tune' and the rest of 'tidymodels'.
+Creates training/testing splits, training/validation/testing splits, and cross-validation folds that are balanced on several variables at once. Numeric and categorical variables are balanced with anticlustering as in Papenberg and Klau (2021) \doi{10.1037/met0000301} and Papenberg (2024) \doi{10.1111/bmsp.12315}, data twinning as in Vakayil and Joseph (2022) \doi{10.1002/sam.11574}, rerandomization as in Morgan and Rubin (2012) \doi{10.1214/12-AOS1008}, or crossed strata. Categorical variables can also be stratified exactly, and rows from the same group can be kept together. Results are 'rsample' objects for resampling and tuning with 'tune'.
 }
 \seealso{
 Useful links:
@@ -18,11 +18,11 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Jeffrey M. Girard \email{jeffgirard@gmail.com}
+\strong{Maintainer}: Jeffrey M. Girard \email{jeffgirard@gmail.com} (\href{https://orcid.org/0000-0002-7359-3746}{ORCID})
 
 Authors:
 \itemize{
-  \item Jeffrey M. Girard \email{jeffgirard@gmail.com}
+  \item Jeffrey M. Girard \email{jeffgirard@gmail.com} (\href{https://orcid.org/0000-0002-7359-3746}{ORCID})
 }
 
 }

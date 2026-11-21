@@ -13,6 +13,8 @@ jobs:
   format-check:
     name: format-check
     runs-on: ubuntu-latest
+    # Usually 6 seconds.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
 

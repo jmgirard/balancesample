@@ -145,3 +145,85 @@
       x Problematic argument:
       * folds = 5
 
+# bad data give clear errors
+
+    Code
+      balanced_vfold_cv(1:10, balance = x)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! `data` must be a data frame, not an integer vector.
+    Code
+      balanced_vfold_cv(data.frame(x = 1), balance = x)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! `data` must have at least two rows.
+    Code
+      balanced_vfold_cv(data.frame(x = c(1, Inf, 3, 4)), v = 2, balance = x)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! x has infinite values.
+    Code
+      balanced_vfold_cv(data.frame(x = as.Date("2026-01-01") + 0:3), v = 2, balance = x)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! `balance` columns must be numeric, logical, character, or factor.
+      x x is a <Date> object.
+
+# more anticlust options are checked
+
+    Code
+      balanced_vfold_cv(d, balance = x1, options = list(covariances = "yes"))
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! Method "anticlust" failed.
+      Caused by error:
+      ! `covariances` must be `TRUE` or `FALSE`.
+    Code
+      balanced_vfold_cv(d, balance = x1, options = list(local_maximum = NA))
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! Method "anticlust" failed.
+      Caused by error:
+      ! `local_maximum` must be `TRUE` or `FALSE`.
+    Code
+      balanced_vfold_cv(d, balance = x1, options = list(repetitions = 0))
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! Method "anticlust" failed.
+      Caused by error:
+      ! `repetitions` must be a whole number of at least 1.
+
+# rerandomize and interaction options are checked
+
+    Code
+      balanced_vfold_cv(d, balance = x1, method = "rerandomize", options = list(
+        p_accept = 0))
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! Method "rerandomize" failed.
+      Caused by error:
+      ! `p_accept` must be a number above 0 and at most 1.
+    Code
+      balanced_vfold_cv(d, balance = x1, method = "rerandomize", options = list(
+        max_draws = 0))
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! Method "rerandomize" failed.
+      Caused by error:
+      ! `max_draws` must be a whole number of at least 1.
+    Code
+      balanced_vfold_cv(d, balance = x1, method = "interaction", options = list(
+        n_bins = 1))
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! Method "interaction" failed.
+      Caused by error:
+      ! `n_bins` must be a whole number of at least 2.
+    Code
+      balanced_vfold_cv(d, balance = x1, method = "interaction", options = list(pool = 1))
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! Method "interaction" failed.
+      Caused by error:
+      ! `pool` must be a number from 0 up to (not including) 1.
+

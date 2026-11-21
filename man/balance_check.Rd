@@ -5,6 +5,7 @@
 \alias{balance_check.rset}
 \alias{balance_check.rsplit}
 \alias{balance_check.three_way_split}
+\alias{summary.balance_check}
 \title{Check the balance of a split or of a set of resamples}
 \usage{
 balance_check(x, ..., max_n = 2000)
@@ -14,6 +15,8 @@ balance_check(x, ..., max_n = 2000)
 \method{balance_check}{rsplit}(x, ..., max_n = 2000)
 
 \method{balance_check}{three_way_split}(x, ..., max_n = 2000)
+
+\method{summary}{balance_check}(object, ...)
 }
 \arguments{
 \item{x}{An \code{rset} (for example from \code{\link[=balanced_vfold_cv]{balanced_vfold_cv()}}), an \code{rsplit}
@@ -21,22 +24,36 @@ balance_check(x, ..., max_n = 2000)
 \code{\link[=balanced_initial_validation_split]{balanced_initial_validation_split()}} or
 \code{\link[rsample:initial_validation_split]{rsample::initial_validation_split()}}).}
 
-\item{...}{<\code{\link[tidyselect:language]{tidy-select}}> Columns to check. If
-empty, the \code{balance} and \code{exact} columns stored in \code{x} are used.}
+\item{...}{For \code{balance_check()}, <\code{\link[tidyselect:language]{tidy-select}}>
+columns to check. If empty, the \code{balance} and \code{exact} columns stored in
+\code{x} are used. For \code{summary()}, not used and must be empty.}
 
 \item{max_n}{The largest number of rows per set for the energy distance.
 Larger sets are subsampled at random to keep memory use low.}
+
+\item{object}{A \code{balance_check} object.}
 }
 \value{
 A tibble with class \code{balance_check}. It has the ID columns of \code{x},
 and the columns \code{variable}, \code{level}, \code{statistic} (\code{"smd"} or \code{"energy"}),
 and \code{value}. Energy rows have \code{NA} in \code{variable} and \code{level}.
+
+\code{summary()} returns a tibble with one row per split. It has the ID
+columns, \code{max_abs_smd} (the largest absolute SMD in the split), the
+\code{variable} and \code{level} with that SMD (the first one if several tie), and
+\code{energy}. If the split has no SMD that isn't missing, \code{max_abs_smd},
+\code{variable}, and \code{level} are \code{NA}. If it has no energy row, \code{energy} is
+\code{NA}. Each split must have its own ID, so no ID may have more than one
+energy row. Only the ID columns that \code{balance_check()} made are used, so
+columns you add are ignored. If you rename or drop an ID column, the
+columns whose names start with \code{id} are used instead.
 }
 \description{
 \code{balance_check()} compares the assessment set of each split with its
 analysis set. For a three-way split, it compares the validation set and the
-testing set each with the training set. It reports a standardized mean difference (SMD) for each
-variable and the energy distance for all variables together. It works
+testing set each with the training set. It reports a standardized mean
+difference (SMD) for each variable and the energy distance for all
+variables together. It works
 with any \code{rset} or \code{rsplit}, so you can compare balanced folds with
 ordinary \code{\link[rsample:vfold_cv]{rsample::vfold_cv()}} folds.
 }
@@ -56,14 +73,15 @@ The energy distance is the V-statistic
 \verb{2 E|X - Y| - E|X - X'| - E|Y - Y'|} on the standardized variables (one
 indicator column per categorical level). It is 0 when the two sets have the
 same distribution, and it also detects differences in spread and shape.
+
+Use \code{summary()} on the result to get one row per split.
 }
 \examples{
 set.seed(1)
-folds <- balanced_vfold_cv(
-  mtcars, v = 4, balance = c(mpg, hp, wt), method = "rerandomize"
-)
+folds <- balanced_vfold_cv(mtcars, v = 4, balance = c(mpg, hp, wt))
 balance_check(folds)
+summary(balance_check(folds))
 
 # Compare with ordinary folds
-balance_check(rsample::vfold_cv(mtcars, v = 4), mpg, hp, wt)
+summary(balance_check(rsample::vfold_cv(mtcars, v = 4), mpg, hp, wt))
 }

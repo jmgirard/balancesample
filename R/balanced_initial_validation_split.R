@@ -22,14 +22,15 @@
 #' The methods, options, and group handling are the same as for
 #' [balanced_vfold_cv()]. With `method = "twinning"`, the data are split
 #' into `m` similar parts with [twinning::multiplet()], and each set gets a
-#' whole number of parts. `strategy` 2 needs `m` to be a power of 2.
+#' whole number of parts. `strategy` 2 needs `m` to be a power of 2. Strata
+#' with fewer than `2 * m` rows (or groups) are split at random.
 #'
 #' # Use with tune
 #'
 #' [rsample::validation_set()] turns the split into an `rset` for
-#' [tune::tune_grid()] and [tune::fit_resamples()]. [tune::last_fit()] takes
-#' the split itself and fits on the training set, or on the training and
-#' validation sets with `add_validation_set = TRUE`.
+#' [tune::tune_grid()] and [tune::fit_resamples()]. [tune::last_fit()] (tune
+#' 1.1.2 or later) takes the split itself and fits on the training set, or on
+#' the training and validation sets with `add_validation_set = TRUE`.
 #'
 #' If a workflow has a postprocessor that must be trained, tune splits the
 #' training set again. Through [rsample::validation_set()], rsample makes
@@ -56,8 +57,7 @@
 #'   mtcars,
 #'   prop = c(0.6, 0.2),
 #'   balance = c(mpg, hp, wt),
-#'   exact = am,
-#'   method = "rerandomize"
+#'   exact = am
 #' )
 #' split
 #' balance_check(split)

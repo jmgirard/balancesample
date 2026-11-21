@@ -14,8 +14,18 @@ knitr::opts_chunk$set(
   fig.width = 7,
   fig.height = 3.5
 )
-needed <- c("anticlust", "twinning", "ggplot2", "parsnip", "rpart", "tune", "workflows")
-knitr::opts_chunk$set(eval = all(vapply(needed, requireNamespace, logical(1), quietly = TRUE)))
+# Leave room for knitr's "#> " prefix within 80 columns.
+options(width = 77)
+needed <- c("twinning", "ggplot2", "parsnip", "rpart", "tune", "workflows")
+missing <- needed[!vapply(needed, requireNamespace, logical(1), quietly = TRUE)]
+# `eval = FALSE` doesn't stop inline code, so stop the article instead.
+if (length(missing) > 0) {
+  knitr::knit_exit(paste0(
+    "This article needs these packages, which are not installed: ",
+    paste(missing, collapse = ", "),
+    "."
+  ))
+}
 ```
 
 This article walks through a modeling project with balancesample: a balanced training/testing split, balanced folds on the training set, tuning with tune, and a final fit. It also shows how to choose the columns to balance, how to check the result, and how to choose a method.
@@ -32,52 +42,66 @@ n <- 300
 d <- data.frame(
   age = rgamma(n, shape = 4, rate = 0.1),
   income = rlnorm(n, meanlog = 10, sdlog = 0.6),
-  diagnosis = factor(sample(c("none", "mild", "severe"), n, TRUE, prob = c(0.6, 0.3, 0.1))),
-  site = factor(sample(c("A", "B", "C"), n, TRUE))
+  diagnosis = factor(sample(
+    c("none", "mild", "severe"),
+    n,
+    replace = TRUE,
+    prob = c(0.6, 0.3, 0.1)
+  )),
+  site = factor(sample(c("A", "B", "C"), n, replace = TRUE))
 )
-d$outcome <- 0.05 * d$age + 0.3 * log(d$income) + 1.5 * (d$diagnosis == "severe") + rnorm(n)
+severe <- d$diagnosis == "severe"
+d$outcome <- 0.05 * d$age + 0.3 * log(d$income) + 1.5 * severe + rnorm(n)
 ```
 
 ## Why balance?
 
-`rsample::vfold_cv(strata = diagnosis)` keeps the mix of diagnoses about the same in every fold. Suppose you also want every fold to have similar ages, incomes, and sites. With 300 rows and 10 folds, each held-out fold has only about 30 rows, so random folds can differ quite a bit from the rest of the data.
+In tidymodels, a modeling project usually starts with `rsample::initial_split()`, which holds out a test set, and `rsample::vfold_cv()`, which makes cross-validation folds from the training set. Both take `strata`, which stratifies on one column: each set gets about the same share of each of its levels. (By default, a numeric column with more than five distinct values is first cut into up to four bins. Otherwise, the rows of levels with under 10% of the rows are spread at random over the other levels.) But what if you want the sets to be similar on several variables at once? Here, we might want every fold to have similar ages, incomes, diagnoses, and sites. With 300 rows and 10 folds, each held-out fold has only about 30 rows, so folds stratified on diagnosis alone can still differ on the other variables, as the output below shows.
 
-`balance_check()` measures this with the standardized mean difference (SMD). For each fold, it takes the held-out rows minus the other rows: the difference in means for a numeric variable, or in proportions for each level of a categorical variable. It then divides by the pooled standard deviation. An absolute SMD under 0.1 is a common rule of thumb for good balance. This helper keeps the largest absolute SMD in each fold:
+`balance_check()` measures how similar the sets are. For each fold, it compares the held-out rows with the other rows in two ways:
 
-```{r helper}
-worst_smd <- function(check) {
-  smd <- check[check$statistic == "smd", ]
-  tapply(abs(smd$value), smd$id, max)
-}
-```
+- The standardized mean difference (SMD) is computed for each variable on its own. It is the difference in means (held-out rows minus the other rows) divided by the pooled standard deviation. For a categorical variable, there is one SMD per level, from the proportions of that level. An absolute SMD under 0.1 is a common rule of thumb for good balance.
+- The energy distance compares all the variables at once. It turns each level of a categorical variable into a 0/1 column, standardizes all the columns, and then looks at the distances between rows. It is twice the average distance between a row of one set and a row of the other, minus the average distance between two rows of the same set (once for each set, counting each row paired with itself). It is 0 when the two sets have the same distribution, and it grows as they differ. Unlike the SMD, it also picks up differences in spread and shape, and in how the variables relate to each other. It has no fixed cutoff like 0.1, so use it to compare splits of the same data on the same variables.
 
-Here are ordinary folds from rsample. For these, you list the columns to check:
+For each fold, `balance_check()` returns one SMD row per numeric variable, one per level of each categorical variable, and one energy row. `summary()` turns this into one row per fold, with the largest absolute SMD, the variable and level it belongs to, and the energy distance. Here are ordinary folds from rsample, stratified on diagnosis. For these, you list the columns to check:
 
 ```{r random}
 random_folds <- rsample::vfold_cv(d, v = 10, strata = diagnosis)
-random_smd <- worst_smd(balance_check(random_folds, age, income, diagnosis, site))
-round(random_smd, 2)
+random_check <- balance_check(random_folds, age, income, diagnosis, site)
+summary(random_check)
 ```
 
 And here are balanced folds. `balance` lists the columns to make similar, and `exact` takes the place of `strata`. The next section explains both. Balanced folds remember these columns, so `balance_check()` needs no column list:
 
 ```{r balanced}
-folds <- balanced_vfold_cv(d, v = 10, balance = c(age, income, site), exact = diagnosis)
-balanced_smd <- worst_smd(balance_check(folds))
-round(balanced_smd, 2)
+folds <- balanced_vfold_cv(
+  d,
+  v = 10,
+  balance = c(age, income),
+  exact = c(diagnosis, site)
+)
+balanced_check <- balance_check(folds)
+summary(balanced_check)
 ```
 
-The largest absolute SMD in any fold fell from `r round(max(random_smd), 2)` to `r round(max(balanced_smd), 3)`. What is left is mostly in the category proportions. These can't come out exactly equal when a level's count doesn't divide evenly into 10 folds.
+```{r compare, include = FALSE}
+random_sum <- summary(random_check)
+balanced_sum <- summary(balanced_check)
+```
+
+The largest absolute SMD in any fold fell from `r round(max(random_sum$max_abs_smd), 2)` to `r round(max(balanced_sum$max_abs_smd), 2)`, and the mean energy distance fell from `r round(mean(random_sum$energy), 3)` to `r round(mean(balanced_sum$energy), 3)`. What is left is mostly in the category proportions. These can't come out exactly equal when a level's count doesn't divide evenly into 10 folds.
 
 ## Choosing columns: `balance` and `exact`
 
-`balance` takes numeric and categorical columns. Numeric columns are standardized, and categorical columns become one 0/1 column per level. The method then makes the sets as similar as it can on all of these columns at once. This is a goal, not a rule, so the method may trade a little balance on one column for more balance on another.
+`balance` takes numeric and categorical columns. To compare the sets, the method turns each level of a categorical column into a 0/1 column and standardizes all the columns. This happens only inside the method: your data and the splits keep the original columns. The method then makes the sets as similar as it can on all of these columns at once. This is a goal, not a rule, so the method may trade a little balance on one column for more balance on another.
 
 `exact` takes categorical columns and is a rule. Each combination of levels is one stratum. In each set, the count of each stratum is its share of that set, rounded up or down to a whole row. This is fixed before the method runs, so it holds for every method.
 
 `exact` does the job of `strata` in rsample, with two differences. It can take several columns, which it crosses, and its counts are exact rather than approximate. If you write `strata` out of habit, balancesample stops and tells you to use `exact`.
 
-A categorical column can go in either argument. Use `exact` when you need the counts as close as whole rows allow. Use `balance` when close is enough. In the folds above, diagnosis is in `exact` because the outcome depends on it, and severe cases are rare. Site is in `balance` because a slightly uneven mix of sites is fine. Continuous columns belong in `balance`. If you need exact counts within ranges of a continuous column, make a factor with `cut()` and put that in `exact`.
+A categorical column can go in either argument. Use `exact` when you need the counts as close as whole rows allow. Use `balance` when close is enough. In the folds above, diagnosis is in `exact` because the outcome depends on it, and severe cases are rare. Site is in `exact` so that each site is represented in proportion in every fold, and later in the test set. If a slightly uneven mix of sites were fine, site could go in `balance` instead.
+
+Continuous columns belong in `balance`. If you need exact counts within ranges of a continuous column, make a factor of those ranges and put that in `exact`. Base R has `cut()`. In the tidyverse, `ggplot2::cut_number()` makes ranges with about the same number of rows, and `ggplot2::cut_interval()` and `ggplot2::cut_width()` make ranges of the same width. `dplyr::ntile()` also works: it returns whole numbers, which `exact` treats as categories.
 
 Each column you add to `exact` splits the strata further. Here diagnosis and site together make 9 strata:
 
@@ -95,18 +119,28 @@ The smallest stratum is `r rownames(tab)[small[1]]` cases at site `r colnames(ta
 
 ## A full tidymodels workflow
 
-Start with a balanced training/testing split. This time, site goes in `exact` too, so that every site is represented in proportion in the test set. Then make balanced folds from the training set only, so the test set plays no part in tuning.
+Start with a balanced training/testing split, with the same columns as above. Then make balanced folds from the training set only, so the test set plays no part in tuning.
 
 ```{r split}
-split <- balanced_initial_split(d, prop = 0.8, balance = c(age, income), exact = c(diagnosis, site))
+split <- balanced_initial_split(
+  d,
+  prop = 0.8,
+  balance = c(age, income),
+  exact = c(diagnosis, site)
+)
 train <- rsample::training(split)
 balance_check(split)
 ```
 
-The last row is the energy distance. It compares the whole joint distribution of the checked columns in the two sets, so it also picks up differences in spread and shape that the SMD misses. It is 0 when the two sets have the same distribution, and smaller is better. Use it to compare splits of the same data on the same columns. Its size has no fixed cutoff like 0.1.
+A single split has few enough rows to read in full. The last row is the energy distance.
 
 ```{r folds}
-folds <- balanced_vfold_cv(train, v = 5, balance = c(age, income), exact = c(diagnosis, site))
+folds <- balanced_vfold_cv(
+  train,
+  v = 5,
+  balance = c(age, income),
+  exact = c(diagnosis, site)
+)
 ```
 
 Use `autoplot()` to see the SMD of every variable in every fold. The dashed lines are at -0.1 and 0.1.
@@ -118,18 +152,23 @@ autoplot(balance_check(folds))
 
 A diagnosis level can land outside the lines even though diagnosis is in `exact`. The counts are exact for each diagnosis and site combination. A fold can be one row off in each of the three sites, and these rows add up for the diagnosis as a whole. Rare levels show this most, because one row is a large share of a small level.
 
-The folds work with tune like any other `rset`. Attach balancesample with `library()` before tuning. tune finds the function that made the folds by its name, so it fails if you only call `balancesample::balanced_vfold_cv()`.
+The folds work with tune like any other `rset`, as long as balancesample is attached with `library()`, as in the chunk below. tune finds the function that made the folds by its name, so it fails if you only call `balancesample::balanced_vfold_cv()`.
 
 This example tunes the depth and the minimum node size of a decision tree:
 
 ```{r tune, message = FALSE}
-library(tune)
+library(balancesample)
 library(parsnip)
+library(tune)
 library(workflows)
 
 wf <- workflow(
   outcome ~ age + income + diagnosis + site,
-  decision_tree(tree_depth = tune(), min_n = tune(), mode = "regression")
+  decision_tree(
+    tree_depth = tune(),
+    min_n = tune(),
+    mode = "regression"
+  )
 )
 res <- tune_grid(wf, resamples = folds, grid = 6)
 show_best(res, metric = "rmse", n = 3)
@@ -145,27 +184,41 @@ collect_metrics(final_fit)
 
 ## Choosing a method
 
-balancesample has four methods. `"anticlust"` (the default) and `"twinning"` need the anticlust and twinning packages. `"rerandomize"` and `"interaction"` need no extra packages. This compares all four on the full data with 10 folds:
+balancesample has four methods. All of them keep the `exact` counts. They differ in how they make the sets similar on the `balance` columns:
+
+- `"anticlust"` (the default) uses k-plus anticlustering from the [anticlust](https://cran.r-project.org/package=anticlust) package ([Papenberg, 2024](https://doi.org/10.1111/bmsp.12315)). It starts from a random assignment and swaps rows of the same `exact` stratum between sets when the swap improves one score for how similar the means and variances of the sets are. By default, it considers every row of the same stratum as a swap partner, so its run time grows quickly with the number of rows.
+- `"twinning"` uses data twinning from the [twinning](https://cran.r-project.org/package=twinning) package ([Vakayil and Joseph, 2022](https://doi.org/10.1002/sam.11574)). It takes one set out of the data at a time. It takes a row and its nearest unused neighbours as a small group and keeps that first row for the set. The next group starts at the unused row closest to the last group's farthest neighbour, so the set covers the data the way the whole data does. It does this within each `exact` stratum. For folds, the default strategy repeats this on the rows that are left. In one test with 10 folds, it took under 0.2 seconds for 1,000 to 10,000 rows (see the README). It needs the twinning package, allows only some split proportions, and splits small strata at random (for folds, strata with fewer than `2 * v` rows).
+- `"rerandomize"` uses rerandomization ([Morgan and Rubin, 2012](https://doi.org/10.1214/12-AOS1008)). It draws stratified random splits and scores each one by its Mahalanobis imbalance: a distance between the means of the sets that takes the correlations between the columns into account. For folds, the score is the largest imbalance of any fold against the rest. It keeps the first draw that scores under a cutoff, set from 100 pilot draws so that about 10% of draws pass. If none of 1,000 draws passes, it uses the best one, with a warning. It balances means only, and needs no extra package.
+- `"interaction"` cuts each numeric column into up to four bins by rank, crosses them with the levels of the categorical columns, and stratifies at random on the result. Within each `exact` stratum, cells with fewer than 10% of all the rows are pooled. Crossed cells get small fast: here, with age and income in quartiles and 9 `exact` strata, the largest cell has 8 rows and the cutoff is 30, so every cell is pooled and the folds are random within the `exact` strata. It is a baseline that shows how crossed strata become sparse.
+
+This compares all four on the full data with 10 folds:
 
 ```{r methods}
 methods <- c("anticlust", "twinning", "rerandomize", "interaction")
-summary_by_method <- lapply(methods, function(m) {
-  f <- balanced_vfold_cv(d, v = 10, balance = c(age, income, site), exact = diagnosis, method = m)
-  check <- balance_check(f)
+by_method <- lapply(methods, function(m) {
+  f <- balanced_vfold_cv(
+    d,
+    v = 10,
+    balance = c(age, income),
+    exact = c(diagnosis, site),
+    method = m
+  )
+  s <- summary(balance_check(f))
   data.frame(
     method = m,
-    worst_smd = max(worst_smd(check)),
-    mean_energy = mean(check$value[check$statistic == "energy"])
+    max_abs_smd = max(s$max_abs_smd),
+    mean_energy = mean(s$energy)
   )
 })
-by_method <- do.call(rbind, summary_by_method)
-by_method[-1] <- round(by_method[-1], 3)
-by_method
+by_method <- do.call(rbind, by_method)
+shown <- by_method
+shown[-1] <- round(shown[-1], 3)
+shown
 ```
 
-In this run, `r by_method$method[which.min(by_method$worst_smd)]` had the smallest worst SMD (`r min(by_method$worst_smd)`), and `r by_method$method[which.min(by_method$mean_energy)]` had the smallest mean energy distance (`r min(by_method$mean_energy)`). These come from one run of each method, so treat small differences as noise.
+In this run, `r by_method$method[which.min(by_method$max_abs_smd)]` had the smallest `max_abs_smd` (`r round(min(by_method$max_abs_smd), 3)`), and `r by_method$method[which.min(by_method$mean_energy)]` had the smallest `mean_energy` (`r round(min(by_method$mean_energy), 3)`). These come from one run of each method on one data set, so they don't show which method does best in general, and small differences may be noise.
 
-Start with anticlust. Its run time grows quickly with the number of rows. On large data, set `options = list(k_neighbours = 20)` or try twinning, then check the balance again. The README lists run times for both. Use rerandomize if you can't install the extra packages. interaction is a baseline that shows how crossed strata become sparse. See `?balanced_vfold_cv` for the options of each method.
+Start with anticlust. On large data, set `options = list(k_neighbours = 20)` or try twinning, then check the balance again. The README lists run times for both. See `?balanced_vfold_cv` for the options of each method.
 
 ## Groups
 
@@ -173,8 +226,14 @@ If the data have several rows per person, put the person ID in `group`. All of a
 
 ```{r groups}
 d$person <- seq_len(n)
-long <- d[rep(seq_len(n), times = sample(1:4, n, TRUE)), ]
-grouped <- balanced_vfold_cv(long, v = 5, balance = c(age, income), exact = diagnosis, group = person)
+long <- d[rep(seq_len(n), times = sample(1:4, n, replace = TRUE)), ]
+grouped <- balanced_vfold_cv(
+  long,
+  v = 5,
+  balance = c(age, income),
+  exact = c(diagnosis, site),
+  group = person
+)
 grouped
 ```
 

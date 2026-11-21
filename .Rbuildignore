@@ -9,3 +9,5 @@
 ^pkgdown$
 ^[.]?air[.]toml$
 ^\.vscode$
+^\.git$
+^cran-comments\.md$

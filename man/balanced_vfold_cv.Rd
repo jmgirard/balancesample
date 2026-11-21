@@ -76,39 +76,50 @@ pass makes no swap (at most 100 passes). \code{FALSE} runs one pass.
 \item \code{repetitions} (default 1): the number of random starts. The best
 result is kept.
 }
-
-The anticlust package is required.
-\item \code{"twinning"} uses \code{\link[twinning:multiplet]{twinning::multiplet()}} for folds. Options are
-\code{strategy} (1, 2, or 3; strategy 2 needs \code{v} to be a power of 2) and
-\code{leaf_size}. For \code{v = 2}, strategies 1 and 2 give the same result.
-Strata with fewer than \code{2 * v} rows are assigned at random. The
-twinning package is required.
+\item \code{"twinning"} uses \code{\link[twinning:multiplet]{twinning::multiplet()}} for folds, or
+\code{\link[twinning:twin]{twinning::twin()}} for \code{v = 2} with strategy 1 or 2, which then give the
+same result. Options are \code{strategy} (1, 2, or 3; strategy 2 needs \code{v} to
+be a power of 2) and \code{leaf_size}. Strata with fewer than \code{2 * v} rows
+(or groups) are assigned at random. The twinning package is required.
 \item \code{"rerandomize"} draws stratified random splits and keeps the first one
 whose Mahalanobis imbalance is under a threshold (Morgan and Rubin,
 2012). For folds, the imbalance is the largest over the "one fold versus
 the rest" comparisons. The threshold is the \code{p_accept} quantile of the
 imbalance over pilot draws made with the same \code{exact} and \code{group}
-constraints (\code{max(100, min(10 / p_accept, max_draws))} draws). Draws
-that tie with the threshold are accepted at random, so that the
-acceptance rate is close to \code{p_accept} even for discrete data. If
-\code{p_accept} is below \code{1 / max(100, max_draws)}, the pilot draws can't
-resolve it, and the threshold is the best pilot draw. Options are \code{p_accept}, the target acceptance rate
-(default 0.1), and \code{max_draws} (default 1000). If no draw meets the
-threshold, the best draw is used with a warning.
+constraints (\code{max(100, min(ceiling(10 / p_accept), max_draws))}
+draws). Draws that tie with the threshold are accepted at random, so
+that the acceptance rate is close to \code{p_accept} even for discrete data.
+If \code{p_accept} is below \code{1 / max(100, max_draws)}, the pilot draws can't
+resolve it, and the threshold is the best pilot draw. Options are
+\code{p_accept}, the target acceptance rate (default 0.1), and \code{max_draws}
+(default 1000). If no draw meets the threshold, the best draw is used
+with a warning.
 \item \code{"interaction"} cuts numeric columns into quantile bins, crosses all
 bins, and stratifies at random. It is a baseline that shows how crossed
 strata become sparse. Options are \code{n_bins} (default 4) and \code{pool}
 (default 0.1): cells with less than this fraction of the rows are pooled.
 }
+
+The method balances the columns left after standardizing: constant and
+nearly constant columns (standard deviation up to 1e-12) are dropped, and
+with \code{group}, so are columns whose group means are all equal (see Groups).
+If none are left, for example with only \code{exact} columns and no \code{group}, the
+method doesn't run and the sets are drawn at random, within the \code{exact}
+strata if there are any. The limits the method itself checks, such as
+twinning's strategy 2 needing a power of 2, then don't apply. The options
+are still checked, and the split functions still check that twinning can
+make \code{prop}.
 }
 
 \section{Groups}{
 If you use \code{group}, each group becomes one row before the method runs.
 This row holds the group means of the standardized \code{balance} columns and
-the log of the group size. The method assigns groups, and then each row
-gets the set of its group. The number of groups per set follows the target
-proportions, so the number of rows per set is only approximate. \code{exact}
-columns must be constant within each group.
+the log of the group size. The group size is added only if a \code{balance}
+column is left after standardizing or there are \code{exact} columns, and it is
+dropped if all groups have the same size. The method assigns groups, and
+then each row gets the set of its group. The number of groups per set
+follows the target proportions, so the number of rows per set is only
+approximate. \code{exact} columns must be constant within each group.
 }
 
 \section{Use with tune}{
@@ -132,25 +143,39 @@ folds <- balanced_vfold_cv(
   mtcars,
   v = 4,
   balance = c(mpg, hp, wt),
-  exact = am,
-  method = "rerandomize"
+  exact = am
 )
 folds
 balance_check(folds)
+
+# Other methods
+balanced_vfold_cv(
+  mtcars,
+  v = 4,
+  balance = c(mpg, hp),
+  method = "rerandomize"
+)
+\dontshow{if (rlang::is_installed("twinning")) withAutoprint(\{ # examplesIf}
+balanced_vfold_cv(mtcars, v = 4, balance = c(mpg, hp), method = "twinning")
+\dontshow{\}) # examplesIf}
 }
 \references{
 Morgan, K. L., & Rubin, D. B. (2012). Rerandomization to improve covariate
 balance in experiments. \emph{The Annals of Statistics, 40}(2), 1263-1282.
+\doi{10.1214/12-AOS1008}
 
 Papenberg, M. (2024). K-plus anticlustering: An improved k-means
 criterion for maximizing between-group similarity. \emph{British Journal of
 Mathematical and Statistical Psychology, 77}(1), 80-102.
+\doi{10.1111/bmsp.12315}
 
 Papenberg, M., & Klau, G. W. (2021). Using anticlustering to partition
 data sets into equivalent parts. \emph{Psychological Methods, 26}(2), 161-174.
+\doi{10.1037/met0000301}
 
 Vakayil, A., & Joseph, V. R. (2022). Data twinning. \emph{Statistical Analysis
 and Data Mining, 15}(5), 598-610.
+\doi{10.1002/sam.11574}
 }
 \seealso{
 \code{\link[=balanced_initial_split]{balanced_initial_split()}}, \code{\link[=balance_check]{balance_check()}}

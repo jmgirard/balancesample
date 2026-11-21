@@ -29,6 +29,7 @@ test_that("repeats give two ID columns and fresh partitions", {
   )
   expect_equal(nrow(folds), 15)
   expect_named(folds, c("splits", "id", "id2"))
+  expect_match(pretty(folds), "repeated 3 times")
   expect_true(assessed_once(folds, nrow(d)))
   first <- rsample::complement(folds$splits[[1]])
   others <- lapply(folds$splits[6:10], rsample::complement)
@@ -232,7 +233,6 @@ test_that("method options are checked", {
 })
 
 test_that("anticlust options work and are checked", {
-  skip_if_not_installed("anticlust")
   d <- sim_data(n = 60)
   opts <- list(
     list(moments = 1),
@@ -261,7 +261,6 @@ test_that("anticlust options work and are checked", {
 })
 
 test_that("anticlust accepts square categorical balance data", {
-  skip_if_not_installed("anticlust")
   d <- data.frame(x = factor(letters[1:4]))
   set.seed(1)
   folds <- balanced_vfold_cv(d, v = 2, balance = x, options = list(moments = 1))
@@ -300,7 +299,6 @@ test_that("rerandomize accepts close to p_accept with tied imbalance", {
 })
 
 test_that("local_maximum balances at least as well as one pass", {
-  skip_if_not_installed("anticlust")
   d <- sim_data(n = 120)
   x <- build_balance_matrix(d[c("x1", "x2", "x3")])
   f <- kplus_features(x, 2, FALSE)
@@ -318,7 +316,6 @@ test_that("local_maximum balances at least as well as one pass", {
 })
 
 test_that("anticlust repetitions keep the exact counts", {
-  skip_if_not_installed("anticlust")
   d <- withr::with_seed(
     1,
     data.frame(x = stats::rnorm(19), s = factor(rep(1:3, c(5, 6, 8))))
@@ -336,7 +333,6 @@ test_that("anticlust repetitions keep the exact counts", {
 })
 
 test_that("anticlust handles factor-only and one-row-per-fold data", {
-  skip_if_not_installed("anticlust")
   set.seed(1)
   folds <- balanced_vfold_cv(data.frame(g = factor(1:6)), 3, balance = g)
   expect_true(assessed_once(folds, 6))
@@ -484,4 +480,281 @@ test_that("print shows the method and design", {
   )
   expect_match(pretty(folds), "stratified by site, grouped by id")
   expect_output(print(folds), "balanced cross-validation")
+
+  # A long header wraps between its parts.
+  withr::local_options(width = 60)
+  header <- utils::capture.output(print(folds))[1:2]
+  expect_equal(
+    header,
+    c(
+      "# 3-fold balanced cross-validation (rerandomize),",
+      "# stratified by site, grouped by id"
+    )
+  )
+  # A header that fits exactly stays on one line.
+  full <- paste0("# ", pretty(folds))
+  withr::local_options(width = nchar(full))
+  expect_equal(utils::capture.output(print(folds))[1], full)
+  withr::local_options(width = nchar(full) - 1)
+  expect_equal(
+    utils::capture.output(print(folds))[1:2],
+    c(
+      "# 3-fold balanced cross-validation (rerandomize), stratified by site,",
+      "# grouped by id"
+    )
+  )
+})
+
+test_that("print wraps long lists of exact columns by display width", {
+  d <- sim_data()
+  d$sex2 <- d$sex
+  d$site2 <- d$site
+  # 16 wide characters, each two columns wide.
+  names(d)[names(d) == "site2"] <- strrep("\u754c", 16)
+  set.seed(12)
+  folds <- balanced_vfold_cv(
+    d,
+    v = 3,
+    balance = x1,
+    exact = c(site, sex, sex2, tidyselect::last_col()),
+    method = "rerandomize"
+  )
+  expect_match(pretty(folds), "stratified by site, sex, sex2, ")
+  withr::local_options(width = 60)
+  header <- grep("^# ", utils::capture.output(print(folds)), value = TRUE)
+  header <- header[seq_len(length(header) - 1)]
+  expect_true(all(nchar(header, type = "width") <= 60))
+  expect_equal(header[2], "# stratified by site, sex, sex2,")
+  expect_equal(
+    paste(sub("^# ", "", header), collapse = " "),
+    pretty(folds)
+  )
+})
+
+test_that("bad data give clear errors", {
+  expect_snapshot(error = TRUE, {
+    balanced_vfold_cv(1:10, balance = x)
+    balanced_vfold_cv(data.frame(x = 1), balance = x)
+    balanced_vfold_cv(data.frame(x = c(1, Inf, 3, 4)), v = 2, balance = x)
+    balanced_vfold_cv(
+      data.frame(x = as.Date("2026-01-01") + 0:3),
+      v = 2,
+      balance = x
+    )
+  })
+})
+
+test_that("more anticlust options are checked", {
+  d <- sim_data(n = 60)
+  expect_snapshot(error = TRUE, {
+    balanced_vfold_cv(d, balance = x1, options = list(covariances = "yes"))
+    balanced_vfold_cv(d, balance = x1, options = list(local_maximum = NA))
+    balanced_vfold_cv(d, balance = x1, options = list(repetitions = 0))
+  })
+})
+
+test_that("rerandomize and interaction options are checked", {
+  d <- sim_data(n = 60)
+  expect_snapshot(error = TRUE, {
+    balanced_vfold_cv(
+      d,
+      balance = x1,
+      method = "rerandomize",
+      options = list(p_accept = 0)
+    )
+    balanced_vfold_cv(
+      d,
+      balance = x1,
+      method = "rerandomize",
+      options = list(max_draws = 0)
+    )
+    balanced_vfold_cv(
+      d,
+      balance = x1,
+      method = "interaction",
+      options = list(n_bins = 1)
+    )
+    balanced_vfold_cv(
+      d,
+      balance = x1,
+      method = "interaction",
+      options = list(pool = 1)
+    )
+  })
+})
+
+test_that("logical balance columns and exact-only groups work", {
+  d <- sim_data()
+  d$flag <- d$x1 > 0
+  set.seed(12)
+  folds <- balanced_vfold_cv(d, v = 4, balance = c(flag, x2))
+  expect_true(assessed_once(folds, nrow(d)))
+  bc <- balance_check(folds)
+  expect_equal(unique(bc$level[bc$variable %in% "flag"]), c("FALSE", "TRUE"))
+
+  set.seed(13)
+  folds <- balanced_vfold_cv(d, v = 4, exact = site, group = id)
+  expect_true(groups_intact(folds, d$id))
+  expect_true(assessed_once(folds, nrow(d)))
+})
+
+test_that("bad option values give the package's own errors", {
+  classed <- structure(3, class = "classed_number")
+  # A class can claim to be numeric; the checks must not ask it.
+  local_mocked_s3_method("is.numeric", "classed_number", function(x) "yes")
+  # Each case is a bad option and the start of its error message.
+  must <- list(
+    moments = "must be 1, 2, 3, or 4",
+    covariances = "must be `TRUE` or `FALSE`",
+    k_neighbours = "must be a whole number of at least 1, or",
+    local_maximum = "must be `TRUE` or `FALSE`",
+    repetitions = "must be a whole number of at least 1",
+    strategy = "must be 1, 2, or 3",
+    leaf_size = "must be a whole number of at least 1",
+    p_accept = "must be a number above 0 and at most 1",
+    max_draws = "must be a whole number of at least 1",
+    n_bins = "must be a whole number of at least 2",
+    pool = "must be a number from 0 up to"
+  )
+  bad <- list(
+    anticlust = list(
+      list(moments = NA_real_),
+      list(moments = 2.5),
+      list(moments = 5),
+      list(moments = 0),
+      list(moments = asS4(2)),
+      list(moments = numeric(0)),
+      list(covariances = matrix(TRUE)),
+      list(covariances = 1),
+      list(covariances = structure(TRUE, class = "classed_number")),
+      list(k_neighbours = 0),
+      list(k_neighbours = -Inf),
+      list(k_neighbours = 1.5),
+      list(k_neighbours = matrix(Inf)),
+      list(k_neighbours = 1e20),
+      list(k_neighbours = classed),
+      list(local_maximum = NA),
+      list(local_maximum = matrix(TRUE)),
+      list(local_maximum = asS4(TRUE)),
+      list(local_maximum = c(TRUE, FALSE)),
+      list(repetitions = NA_real_),
+      list(repetitions = 0),
+      list(repetitions = 1.5)
+    ),
+    rerandomize = list(
+      list(p_accept = NA_real_),
+      list(p_accept = 2),
+      list(p_accept = 0),
+      list(p_accept = -0.1),
+      list(p_accept = TRUE),
+      list(p_accept = matrix(0.5)),
+      list(p_accept = structure(0.5, class = "classed_number")),
+      list(max_draws = NA_real_),
+      list(max_draws = 2.5),
+      list(max_draws = 2^52),
+      list(max_draws = 0)
+    ),
+    interaction = list(
+      list(n_bins = NA_real_),
+      list(n_bins = 2.5),
+      list(n_bins = matrix(2)),
+      list(n_bins = 1),
+      list(pool = NA_real_),
+      list(pool = 1),
+      list(pool = -0.1),
+      list(pool = matrix(0.5))
+    ),
+    twinning = list(
+      list(strategy = 1:2),
+      list(strategy = 4),
+      list(strategy = 0),
+      list(leaf_size = NA_real_),
+      list(leaf_size = 0),
+      list(leaf_size = -1),
+      list(leaf_size = 2.5),
+      list(leaf_size = classed)
+    )
+  )
+  # The twinning checks run without twinning, so test them directly too.
+  for (o in bad$twinning) {
+    nm <- names(o)
+    err <- expect_error(
+      rlang::exec(check_twinning_options, !!!o),
+      class = "rlang_error"
+    )
+    expect_match(
+      conditionMessage(err),
+      paste0("`", nm, "` ", must[[nm]]),
+      fixed = TRUE
+    )
+  }
+  if (!rlang::is_installed("twinning")) {
+    bad$twinning <- NULL
+  }
+  d <- data.frame(
+    x = 1:12,
+    const = 1,
+    ex = rep(c("a", "b"), 6),
+    g = rep(1:6, 2)
+  )
+  # With exact or constant columns only, the method doesn't run, but its
+  # options are still checked.
+  calls <- list(
+    balance = function(m, o) {
+      balanced_vfold_cv(d, 2, balance = x, method = m, options = o)
+    },
+    exact = function(m, o) {
+      balanced_vfold_cv(d, 2, exact = ex, method = m, options = o)
+    },
+    constant = function(m, o) {
+      balanced_vfold_cv(d, 2, balance = const, method = m, options = o)
+    },
+    group = function(m, o) {
+      balanced_vfold_cv(d, 2, balance = x, group = g, method = m, options = o)
+    },
+    split = function(m, o) {
+      balanced_initial_split(d, 1 / 2, balance = x, method = m, options = o)
+    },
+    validation = function(m, o) {
+      balanced_initial_validation_split(
+        d,
+        c(0.5, 0.25),
+        balance = x,
+        method = m,
+        options = o
+      )
+    }
+  )
+  for (m in names(bad)) {
+    for (o in bad[[m]]) {
+      nm <- names(o)
+      for (cl in names(calls)) {
+        # Two-way splits refuse `strategy` before the method is chosen.
+        if (cl == "split" && nm == "strategy") {
+          next
+        }
+        err <- expect_error(calls[[cl]](m, o), class = "rlang_error")
+        expect_s3_class(err$parent, "rlang_error")
+        expect_match(
+          conditionMessage(err$parent),
+          paste0("`", nm, "` ", must[[nm]]),
+          fixed = TRUE,
+          info = paste(m, nm, cl)
+        )
+      }
+    }
+  }
+})
+
+test_that("option names must not be missing", {
+  expect_error(
+    balanced_vfold_cv(
+      mtcars,
+      2,
+      balance = mpg,
+      options = stats::setNames(list(2), NA_character_)
+    ),
+    "unique names",
+    class = "rlang_error"
+  )
 })

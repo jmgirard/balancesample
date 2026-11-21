@@ -15,10 +15,7 @@ sim_data <- function(n = 200, n_groups = 40) {
 }
 
 available_methods <- function() {
-  m <- c("rerandomize", "interaction")
-  if (rlang::is_installed("anticlust")) {
-    m <- c("anticlust", m)
-  }
+  m <- c("anticlust", "rerandomize", "interaction")
   if (rlang::is_installed("twinning")) {
     m <- c(m, "twinning")
   }

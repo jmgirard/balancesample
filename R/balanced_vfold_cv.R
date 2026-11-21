@@ -45,38 +45,49 @@
 #'     pass makes no swap (at most 100 passes). `FALSE` runs one pass.
 #'   * `repetitions` (default 1): the number of random starts. The best
 #'     result is kept.
-#'
-#'   The anticlust package is required.
-#' * `"twinning"` uses [twinning::multiplet()] for folds. Options are
-#'   `strategy` (1, 2, or 3; strategy 2 needs `v` to be a power of 2) and
-#'   `leaf_size`. For `v = 2`, strategies 1 and 2 give the same result.
-#'   Strata with fewer than `2 * v` rows are assigned at random. The
-#'   twinning package is required.
+#' * `"twinning"` uses [twinning::multiplet()] for folds, or
+#'   [twinning::twin()] for `v = 2` with strategy 1 or 2, which then give the
+#'   same result. Options are `strategy` (1, 2, or 3; strategy 2 needs `v` to
+#'   be a power of 2) and `leaf_size`. Strata with fewer than `2 * v` rows
+#'   (or groups) are assigned at random. The twinning package is required.
 #' * `"rerandomize"` draws stratified random splits and keeps the first one
 #'   whose Mahalanobis imbalance is under a threshold (Morgan and Rubin,
 #'   2012). For folds, the imbalance is the largest over the "one fold versus
 #'   the rest" comparisons. The threshold is the `p_accept` quantile of the
 #'   imbalance over pilot draws made with the same `exact` and `group`
-#'   constraints (`max(100, min(10 / p_accept, max_draws))` draws). Draws
-#'   that tie with the threshold are accepted at random, so that the
-#'   acceptance rate is close to `p_accept` even for discrete data. If
-#'   `p_accept` is below `1 / max(100, max_draws)`, the pilot draws can't
-#'   resolve it, and the threshold is the best pilot draw. Options are `p_accept`, the target acceptance rate
-#'   (default 0.1), and `max_draws` (default 1000). If no draw meets the
-#'   threshold, the best draw is used with a warning.
+#'   constraints (`max(100, min(ceiling(10 / p_accept), max_draws))`
+#'   draws). Draws that tie with the threshold are accepted at random, so
+#'   that the acceptance rate is close to `p_accept` even for discrete data.
+#'   If `p_accept` is below `1 / max(100, max_draws)`, the pilot draws can't
+#'   resolve it, and the threshold is the best pilot draw. Options are
+#'   `p_accept`, the target acceptance rate (default 0.1), and `max_draws`
+#'   (default 1000). If no draw meets the threshold, the best draw is used
+#'   with a warning.
 #' * `"interaction"` cuts numeric columns into quantile bins, crosses all
 #'   bins, and stratifies at random. It is a baseline that shows how crossed
 #'   strata become sparse. Options are `n_bins` (default 4) and `pool`
 #'   (default 0.1): cells with less than this fraction of the rows are pooled.
 #'
+#' The method balances the columns left after standardizing: constant and
+#' nearly constant columns (standard deviation up to 1e-12) are dropped, and
+#' with `group`, so are columns whose group means are all equal (see Groups).
+#' If none are left, for example with only `exact` columns and no `group`, the
+#' method doesn't run and the sets are drawn at random, within the `exact`
+#' strata if there are any. The limits the method itself checks, such as
+#' twinning's strategy 2 needing a power of 2, then don't apply. The options
+#' are still checked, and the split functions still check that twinning can
+#' make `prop`.
+#'
 #' # Groups
 #'
 #' If you use `group`, each group becomes one row before the method runs.
 #' This row holds the group means of the standardized `balance` columns and
-#' the log of the group size. The method assigns groups, and then each row
-#' gets the set of its group. The number of groups per set follows the target
-#' proportions, so the number of rows per set is only approximate. `exact`
-#' columns must be constant within each group.
+#' the log of the group size. The group size is added only if a `balance`
+#' column is left after standardizing or there are `exact` columns, and it is
+#' dropped if all groups have the same size. The method assigns groups, and
+#' then each row gets the set of its group. The number of groups per set
+#' follows the target proportions, so the number of rows per set is only
+#' approximate. `exact` columns must be constant within each group.
 #'
 #' # Use with tune
 #'
@@ -99,16 +110,20 @@
 #' @references
 #' Morgan, K. L., & Rubin, D. B. (2012). Rerandomization to improve covariate
 #' balance in experiments. *The Annals of Statistics, 40*(2), 1263-1282.
+#' \doi{10.1214/12-AOS1008}
 #'
 #' Papenberg, M. (2024). K-plus anticlustering: An improved k-means
 #' criterion for maximizing between-group similarity. *British Journal of
 #' Mathematical and Statistical Psychology, 77*(1), 80-102.
+#' \doi{10.1111/bmsp.12315}
 #'
 #' Papenberg, M., & Klau, G. W. (2021). Using anticlustering to partition
 #' data sets into equivalent parts. *Psychological Methods, 26*(2), 161-174.
+#' \doi{10.1037/met0000301}
 #'
 #' Vakayil, A., & Joseph, V. R. (2022). Data twinning. *Statistical Analysis
 #' and Data Mining, 15*(5), 598-610.
+#' \doi{10.1002/sam.11574}
 #'
 #' @seealso [balanced_initial_split()], [balance_check()]
 #'
@@ -118,11 +133,20 @@
 #'   mtcars,
 #'   v = 4,
 #'   balance = c(mpg, hp, wt),
-#'   exact = am,
-#'   method = "rerandomize"
+#'   exact = am
 #' )
 #' folds
 #' balance_check(folds)
+#'
+#' # Other methods
+#' balanced_vfold_cv(
+#'   mtcars,
+#'   v = 4,
+#'   balance = c(mpg, hp),
+#'   method = "rerandomize"
+#' )
+#' @examplesIf rlang::is_installed("twinning")
+#' balanced_vfold_cv(mtcars, v = 4, balance = c(mpg, hp), method = "twinning")
 #' @export
 balanced_vfold_cv <- function(
   data,
@@ -203,7 +227,7 @@ balanced_vfold_cv <- function(
 
 #' @export
 print.balanced_vfold_cv <- function(x, ...) {
-  cat("# ", pretty(x), "\n", sep = "")
+  cat_header(header_parts(x))
   class(x) <- class(x)[!(class(x) %in% c("balanced_vfold_cv", "rset"))]
   print(x, ...)
   invisible(x)
@@ -211,6 +235,10 @@ print.balanced_vfold_cv <- function(x, ...) {
 
 #' @export
 pretty.balanced_vfold_cv <- function(x, ...) {
+  paste(header_parts(x), collapse = ", ")
+}
+
+header_parts <- function(x) {
   details <- attributes(x)
   res <- paste0(
     details$v,
@@ -221,20 +249,36 @@ pretty.balanced_vfold_cv <- function(x, ...) {
   if (!is.null(details$repeats) && details$repeats > 1) {
     res <- paste(res, "repeated", details$repeats, "times")
   }
-  extra <- character()
   if (length(details$exact) > 0) {
-    extra <- c(
-      extra,
-      paste("stratified by", paste(details$exact, collapse = ", "))
-    )
+    # One part per column, so a long list can wrap between column names.
+    exact <- details$exact
+    res <- c(res, paste("stratified by", exact[1]), exact[-1])
   }
   if (length(details$group) > 0) {
-    extra <- c(extra, paste("grouped by", details$group))
-  }
-  if (length(extra) > 0) {
-    res <- paste0(res, ", ", paste(extra, collapse = ", "))
+    res <- c(res, paste("grouped by", details$group))
   }
   res
+}
+
+# Print a "# " header that joins `parts` with commas. A new line starts
+# between parts when the next part, with its comma, would pass the console
+# width. Widths are display widths, so wide characters count twice.
+cat_header <- function(parts) {
+  width <- getOption("width") - 2
+  size <- function(x) nchar(x, type = "width")
+  lines <- parts[1]
+  n <- length(parts)
+  for (i in seq_len(n)[-1]) {
+    last <- length(lines)
+    comma <- if (i < n) 1 else 0
+    if (size(lines[last]) + 2 + size(parts[i]) + comma <= width) {
+      lines[last] <- paste0(lines[last], ", ", parts[i])
+    } else {
+      lines[last] <- paste0(lines[last], ",")
+      lines <- c(lines, parts[i])
+    }
+  }
+  cat(paste0("# ", lines, "\n"), sep = "")
 }
 
 names0 <- function(num, prefix) {

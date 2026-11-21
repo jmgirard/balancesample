@@ -2,14 +2,56 @@
 
 # anticlust -------------------------------------------------------------------
 
+check_anticlust_options <- function(
+  moments = 2L,
+  covariances = FALSE,
+  k_neighbours = Inf,
+  local_maximum = TRUE,
+  repetitions = 1L
+) {
+  if (!is_whole_number(moments) || moments < 1 || moments > 4) {
+    cli::cli_abort("{.arg moments} must be 1, 2, 3, or 4.", call = NULL)
+  }
+  if (!is_flag(covariances)) {
+    cli::cli_abort(
+      "{.arg covariances} must be {.code TRUE} or {.code FALSE}.",
+      call = NULL
+    )
+  }
+  if (
+    !is_number(k_neighbours) ||
+      k_neighbours < 1 ||
+      (is.finite(k_neighbours) && !is_whole_number(k_neighbours))
+  ) {
+    cli::cli_abort(
+      "{.arg k_neighbours} must be a whole number of at least 1, or {.code Inf}.",
+      call = NULL
+    )
+  }
+  if (!is_flag(local_maximum)) {
+    cli::cli_abort(
+      "{.arg local_maximum} must be {.code TRUE} or {.code FALSE}.",
+      call = NULL
+    )
+  }
+  if (!is_whole_number(repetitions) || repetitions < 1) {
+    cli::cli_abort(
+      "{.arg repetitions} must be a whole number of at least 1.",
+      call = NULL
+    )
+  }
+  invisible()
+}
+
 # k-plus anticlustering (Papenberg, 2024) with anticlust::fast_anticlustering():
 # the k-means criterion on the balance columns plus their higher moments (and,
 # optionally, pairwise products), so that set means, variances, and so on are
 # similar. The exchange step only swaps rows that share a category, so a
 # stratified random start keeps the exact counts from allocate_strata(). With
-# `local_maximum = TRUE`, exchange passes repeat until a pass makes no swap. Each repetition starts from a new stratified assignment. Groups
-# are handled by aggregation: anticlust's `must_link` needs fold sizes that
-# groups can fill exactly, which real grouped data rarely allows.
+# `local_maximum = TRUE`, exchange passes repeat until a pass makes no swap.
+# Each repetition starts from a new stratified assignment. Groups are handled
+# by aggregation: anticlust's `must_link` needs fold sizes that groups can
+# fill exactly, which real grouped data rarely allows.
 method_anticlust <- function(
   x_scaled,
   sizes,
@@ -21,49 +63,13 @@ method_anticlust <- function(
   local_maximum = TRUE,
   repetitions = 1L
 ) {
-  rlang::check_installed(
-    "anticlust",
-    reason = "to use `method = \"anticlust\"`."
+  check_anticlust_options(
+    moments,
+    covariances,
+    k_neighbours,
+    local_maximum,
+    repetitions
   )
-  if (
-    !rlang::is_scalar_integerish(moments, finite = TRUE) ||
-      moments < 1 ||
-      moments > 4
-  ) {
-    cli::cli_abort("{.arg moments} must be 1, 2, 3, or 4.", call = NULL)
-  }
-  if (!rlang::is_bool(covariances)) {
-    cli::cli_abort(
-      "{.arg covariances} must be {.code TRUE} or {.code FALSE}.",
-      call = NULL
-    )
-  }
-  if (
-    !is.numeric(k_neighbours) ||
-      length(k_neighbours) != 1 ||
-      is.na(k_neighbours) ||
-      k_neighbours < 1 ||
-      (is.finite(k_neighbours) && k_neighbours != round(k_neighbours))
-  ) {
-    cli::cli_abort(
-      "{.arg k_neighbours} must be a whole number of at least 1, or {.code Inf}.",
-      call = NULL
-    )
-  }
-  if (!rlang::is_bool(local_maximum)) {
-    cli::cli_abort(
-      "{.arg local_maximum} must be {.code TRUE} or {.code FALSE}.",
-      call = NULL
-    )
-  }
-  if (
-    !rlang::is_scalar_integerish(repetitions, finite = TRUE) || repetitions < 1
-  ) {
-    cli::cli_abort(
-      "{.arg repetitions} must be a whole number of at least 1.",
-      call = NULL
-    )
-  }
 
   k <- length(sizes)
   # With one row per set, an exchange can only relabel the sets.
@@ -140,6 +146,25 @@ kplus_features <- function(x, moments, covariances) {
 
 # twinning --------------------------------------------------------------------
 
+# `parts` is set internally, not by users. twinning's native code crashes R
+# for a `leaf_size` below 1 or NA, so it is checked here.
+check_twinning_options <- function(
+  strategy = 1L,
+  leaf_size = 8L,
+  parts = NULL
+) {
+  if (!is_whole_number(strategy) || !strategy %in% 1:3) {
+    cli::cli_abort("{.arg strategy} must be 1, 2, or 3.", call = NULL)
+  }
+  if (!is_whole_number(leaf_size) || leaf_size < 1) {
+    cli::cli_abort(
+      "{.arg leaf_size} must be a whole number of at least 1.",
+      call = NULL
+    )
+  }
+  invisible()
+}
+
 method_twinning <- function(
   x_scaled,
   sizes,
@@ -150,15 +175,12 @@ method_twinning <- function(
   parts = NULL
 ) {
   rlang::check_installed("twinning", reason = "to use `method = \"twinning\"`.")
+  check_twinning_options(strategy, leaf_size)
   k <- length(sizes)
   # twinning drops matrix dimensions for one column; a zero column does not
   # change any distance.
   if (ncol(x_scaled) == 1) {
     x_scaled <- cbind(x_scaled, 0)
-  }
-
-  if (!strategy %in% 1:3) {
-    cli::cli_abort("{.arg strategy} must be 1, 2, or 3.", call = NULL)
   }
 
   # `parts` (set by balanced_initial_split() and
@@ -262,6 +284,22 @@ is_power_of_two <- function(k) {
 
 # rerandomize -----------------------------------------------------------------
 
+check_rerandomize_options <- function(p_accept = 0.1, max_draws = 1000L) {
+  if (!is_number(p_accept) || p_accept <= 0 || p_accept > 1) {
+    cli::cli_abort(
+      "{.arg p_accept} must be a number above 0 and at most 1.",
+      call = NULL
+    )
+  }
+  if (!is_whole_number(max_draws) || max_draws < 1) {
+    cli::cli_abort(
+      "{.arg max_draws} must be a whole number of at least 1.",
+      call = NULL
+    )
+  }
+  invisible()
+}
+
 # Morgan and Rubin (2012): draw stratified random splits and keep the first
 # whose Mahalanobis imbalance is under a threshold. For more than two sets the
 # statistic is the largest value over "one set versus the rest" comparisons.
@@ -277,23 +315,7 @@ method_rerandomize <- function(
   p_accept = 0.1,
   max_draws = 1000L
 ) {
-  if (
-    !is.numeric(p_accept) ||
-      length(p_accept) != 1 ||
-      p_accept <= 0 ||
-      p_accept > 1
-  ) {
-    cli::cli_abort(
-      "{.arg p_accept} must be a number above 0 and at most 1.",
-      call = NULL
-    )
-  }
-  if (!is.numeric(max_draws) || length(max_draws) != 1 || max_draws < 1) {
-    cli::cli_abort(
-      "{.arg max_draws} must be a whole number of at least 1.",
-      call = NULL
-    )
-  }
+  check_rerandomize_options(p_accept, max_draws)
   k <- length(sizes)
   inv <- pseudo_inverse(stats::cov(x_scaled))
   if (inv$rank == 0) {
@@ -370,6 +392,22 @@ pseudo_inverse <- function(m) {
 
 # interaction -----------------------------------------------------------------
 
+check_interaction_options <- function(n_bins = 4L, pool = 0.1) {
+  if (!is_whole_number(n_bins) || n_bins < 2) {
+    cli::cli_abort(
+      "{.arg n_bins} must be a whole number of at least 2.",
+      call = NULL
+    )
+  }
+  if (!is_number(pool) || pool < 0 || pool >= 1) {
+    cli::cli_abort(
+      "{.arg pool} must be a number from 0 up to (not including) 1.",
+      call = NULL
+    )
+  }
+  invisible()
+}
+
 # Baseline: cut each numeric column into quantile bins, cross all bins, pool
 # sparse cells, and stratify at random. Exact strata stay exact because the
 # crossed cells are nested inside them.
@@ -381,18 +419,7 @@ method_interaction <- function(
   n_bins = 4L,
   pool = 0.1
 ) {
-  if (!is.numeric(n_bins) || length(n_bins) != 1 || n_bins < 2) {
-    cli::cli_abort(
-      "{.arg n_bins} must be a whole number of at least 2.",
-      call = NULL
-    )
-  }
-  if (!is.numeric(pool) || length(pool) != 1 || pool < 0 || pool >= 1) {
-    cli::cli_abort(
-      "{.arg pool} must be a number from 0 up to (not including) 1.",
-      call = NULL
-    )
-  }
+  check_interaction_options(n_bins, pool)
   bins <- lapply(seq_len(ncol(x_scaled)), function(j) {
     bin_column(x_scaled[, j], n_bins)
   })
@@ -419,4 +446,33 @@ pool_strata <- function(fine, exact, min_size) {
   small <- key %in% names(tab)[tab < min_size]
   key[small] <- paste0(prefix[pmin(length(prefix), which(small))], ".pooled")
   factor(key)
+}
+
+# option helpers ---------------------------------------------------------------
+
+# One plain number that is not NA. Classed numbers (such as bit64's
+# integer64) and arrays are refused, because their arithmetic can pass these
+# checks while the native code of the methods reads something else.
+# is.object() comes first, so that no class method of is.numeric() runs.
+is_number <- function(x) {
+  !is.object(x) &&
+    !isS4(x) &&
+    is.numeric(x) &&
+    length(x) == 1 &&
+    is.null(dim(x)) &&
+    !is.na(x)
+}
+
+# TRUE or FALSE, as a plain vector of length one.
+is_flag <- function(x) {
+  !is.object(x) && !isS4(x) && rlang::is_bool(x) && is.null(dim(x))
+}
+
+# A whole number small enough to be an integer, so that seq_len() and the
+# native code of the methods can use it.
+is_whole_number <- function(x) {
+  is_number(x) &&
+    is.finite(x) &&
+    x == round(x) &&
+    abs(x) <= .Machine$integer.max
 }
