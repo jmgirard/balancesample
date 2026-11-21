@@ -8,13 +8,13 @@
 \alias{summary.balance_check}
 \title{Check the balance of a split or of a set of resamples}
 \usage{
-balance_check(x, ..., max_n = 2000)
+balance_check(x, ..., max_n = 2000, variance_ratio = FALSE)
 
-\method{balance_check}{rset}(x, ..., max_n = 2000)
+\method{balance_check}{rset}(x, ..., max_n = 2000, variance_ratio = FALSE)
 
-\method{balance_check}{rsplit}(x, ..., max_n = 2000)
+\method{balance_check}{rsplit}(x, ..., max_n = 2000, variance_ratio = FALSE)
 
-\method{balance_check}{three_way_split}(x, ..., max_n = 2000)
+\method{balance_check}{three_way_split}(x, ..., max_n = 2000, variance_ratio = FALSE)
 
 \method{summary}{balance_check}(object, ...)
 }
@@ -31,17 +31,23 @@ columns to check. If empty, the \code{balance} and \code{exact} columns stored i
 \item{max_n}{The largest number of rows per set for the energy distance.
 Larger sets are subsampled at random to keep memory use low.}
 
+\item{variance_ratio}{If \code{TRUE}, also report the variance ratio of each
+numeric variable.}
+
 \item{object}{A \code{balance_check} object.}
 }
 \value{
 A tibble with class \code{balance_check}. It has the ID columns of \code{x},
-and the columns \code{variable}, \code{level}, \code{statistic} (\code{"smd"} or \code{"energy"}),
-and \code{value}. Energy rows have \code{NA} in \code{variable} and \code{level}.
+and the columns \code{variable}, \code{level}, \code{statistic} (\code{"smd"}, \code{"energy"}, or
+\code{"variance_ratio"}), and \code{value}. Energy rows have \code{NA} in \code{variable} and
+\code{level}.
 
 \code{summary()} returns a tibble with one row per split. It has the ID
 columns, \code{max_abs_smd} (the largest absolute SMD in the split), the
 \code{variable} and \code{level} with that SMD (the first one if several tie), and
-\code{energy}. If the split has no SMD that isn't missing, \code{max_abs_smd},
+\code{energy}. With variance ratios, it also has \code{variance_ratio}, the ratio
+farthest from 1 on the log scale (so 0.25 is farther than 3). If the
+split has no SMD that isn't missing, \code{max_abs_smd},
 \code{variable}, and \code{level} are \code{NA}. If it has no energy row, \code{energy} is
 \code{NA}. Each split must have its own ID, so no ID may have more than one
 energy row. Only the ID columns that \code{balance_check()} made are used, so
@@ -66,7 +72,21 @@ under 0.1 in absolute size are often taken as good balance. If both sets
 have zero variance but different means, the SMD is \code{Inf} or \code{-Inf}; the
 plot shows these values at the edge of the panel.
 
-Missing values are dropped variable by variable for the SMD. The energy
+Stored \code{exact} columns with whole numbers are treated as categories, as
+the split functions treat them, so they get one SMD per level and no
+variance ratio. This holds whether you name them or not. Other
+whole-number columns are numeric.
+
+With \code{variance_ratio = TRUE}, each numeric variable also gets the variance
+of the assessment set divided by the variance of the analysis set. It is 1
+when the spreads are equal, and values between 0.5 and 2 are often taken
+as good balance. The SMD can be 0 while the spreads differ, and the
+variance ratio shows which variable differs. A variance within rounding
+error of zero counts as zero: if both are zero, the ratio is 1, and if one
+is, it is 0 or \code{Inf}. With fewer than two values in a set, it is \code{NA}.
+
+Missing values are dropped variable by variable for the SMD and the
+variance ratio. The energy
 distance uses the rows that have no missing values in any checked column.
 
 The energy distance is the V-statistic
@@ -81,6 +101,7 @@ set.seed(1)
 folds <- balanced_vfold_cv(mtcars, v = 4, balance = c(mpg, hp, wt))
 balance_check(folds)
 summary(balance_check(folds))
+summary(balance_check(folds, variance_ratio = TRUE))
 
 # Compare with ordinary folds
 summary(balance_check(rsample::vfold_cv(mtcars, v = 4), mpg, hp, wt))

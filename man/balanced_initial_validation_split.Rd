@@ -26,8 +26,9 @@ of \code{1/m} for one whole number \code{m} up to 20, for example \code{c(0.6, 0
 (\code{m = 5}) or \code{c(0.5, 0.25)} (\code{m = 4}).}
 
 \item{balance}{<\code{\link[tidyselect:language]{tidy-select}}> Columns to balance
-across the sets. Numeric columns are standardized. Factor, character, and
-logical columns become one indicator column per level.}
+across the sets. Numeric columns are standardized. So are \code{Date},
+\code{POSIXct}, and \code{difftime} columns, as numbers of days or seconds. Factor,
+character, and logical columns become one indicator column per level.}
 
 \item{exact}{<\code{\link[tidyselect:language]{tidy-select}}> Categorical columns to
 stratify exactly. Each combination of levels is one stratum. In each
@@ -39,7 +40,10 @@ numbers of groups, not rows. \code{exact} does the job of \code{strata} in
 rsample, but it takes several columns and its counts are exact. Numeric
 columns with whole-number values are treated as categories. Put
 continuous columns in \code{balance}, or use \code{\link[=cut]{cut()}} to make a factor if you
-need exact counts within ranges.}
+need exact counts within ranges. A stratum whose share of the smallest
+set is under one row (or group) can be missing from some sets. If more
+than half of the strata are missing from at least one set, you get a
+warning.}
 
 \item{group}{<\code{\link[tidyselect:language]{tidy-select}}> One column with group
 IDs. All rows of a group go to the same set. See Details.}

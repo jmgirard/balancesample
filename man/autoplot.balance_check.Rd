@@ -19,8 +19,9 @@ A ggplot object.
 \description{
 Plot the output of \code{\link[=balance_check]{balance_check()}}. \code{type = "smd"} shows the
 standardized mean difference of each variable in each split, with dashed
-lines at -0.1 and 0.1. \code{type = "energy"} shows the energy distance of each
-split.
+lines at -0.1 and 0.1. For a three-way split, the validation and testing
+sets have different shapes. \code{type = "energy"} shows the energy distance of
+each split.
 }
 \examples{
 \dontshow{if (rlang::is_installed("ggplot2")) withAutoprint(\{ # examplesIf}

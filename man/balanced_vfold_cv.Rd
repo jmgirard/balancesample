@@ -24,8 +24,9 @@ balanced_vfold_cv(
 \item{repeats}{The number of times to repeat the V-fold partitioning.}
 
 \item{balance}{<\code{\link[tidyselect:language]{tidy-select}}> Columns to balance
-across the sets. Numeric columns are standardized. Factor, character, and
-logical columns become one indicator column per level.}
+across the sets. Numeric columns are standardized. So are \code{Date},
+\code{POSIXct}, and \code{difftime} columns, as numbers of days or seconds. Factor,
+character, and logical columns become one indicator column per level.}
 
 \item{exact}{<\code{\link[tidyselect:language]{tidy-select}}> Categorical columns to
 stratify exactly. Each combination of levels is one stratum. In each
@@ -37,7 +38,10 @@ numbers of groups, not rows. \code{exact} does the job of \code{strata} in
 rsample, but it takes several columns and its counts are exact. Numeric
 columns with whole-number values are treated as categories. Put
 continuous columns in \code{balance}, or use \code{\link[=cut]{cut()}} to make a factor if you
-need exact counts within ranges.}
+need exact counts within ranges. A stratum whose share of the smallest
+set is under one row (or group) can be missing from some sets. If more
+than half of the strata are missing from at least one set, you get a
+warning.}
 
 \item{group}{<\code{\link[tidyselect:language]{tidy-select}}> One column with group
 IDs. All rows of a group go to the same set. See Details.}
@@ -69,8 +73,10 @@ means only, 3 adds skewness, and 4 adds kurtosis.
 \item \code{covariances} (default \code{FALSE}): also balance the product of each
 pair of \code{balance} columns.
 \item \code{k_neighbours} (default \code{Inf}): the number of nearest neighbours each
-row may swap with. \code{Inf} tries every swap. A small number, such as
-20, is faster on large data.
+row may swap with. \code{Inf} tries every swap, so the run time grows
+quickly with the number of rows. A small number, such as 20, is much
+faster on large data, but categorical \code{balance} columns can end up
+less balanced. Check the result with \code{\link[=balance_check]{balance_check()}}.
 \item \code{local_maximum} (default \code{TRUE}): repeat the exchange passes until a
 pass makes no swap (at most 100 passes). \code{FALSE} runs one pass.
 \item \code{repetitions} (default 1): the number of random starts. The best
@@ -100,9 +106,9 @@ strata become sparse. Options are \code{n_bins} (default 4) and \code{pool}
 (default 0.1): cells with less than this fraction of the rows are pooled.
 }
 
-The method balances the columns left after standardizing: constant and
-nearly constant columns (standard deviation up to 1e-12) are dropped, and
-with \code{group}, so are columns whose group means are all equal (see Groups).
+The method balances the columns left after standardizing: constant columns
+are dropped, and with \code{group}, so are columns whose group means are all
+equal up to rounding error (see Groups).
 If none are left, for example with only \code{exact} columns and no \code{group}, the
 method doesn't run and the sets are drawn at random, within the \code{exact}
 strata if there are any. The limits the method itself checks, such as

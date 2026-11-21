@@ -8,8 +8,9 @@
 #' @param v The number of folds.
 #' @param repeats The number of times to repeat the V-fold partitioning.
 #' @param balance <[`tidy-select`][tidyselect::language]> Columns to balance
-#'   across the sets. Numeric columns are standardized. Factor, character, and
-#'   logical columns become one indicator column per level.
+#'   across the sets. Numeric columns are standardized. So are `Date`,
+#'   `POSIXct`, and `difftime` columns, as numbers of days or seconds. Factor,
+#'   character, and logical columns become one indicator column per level.
 #' @param exact <[`tidy-select`][tidyselect::language]> Categorical columns to
 #'   stratify exactly. Each combination of levels is one stratum. In each
 #'   stratum, the count in every set is the floor or the ceiling of its
@@ -20,7 +21,10 @@
 #'   rsample, but it takes several columns and its counts are exact. Numeric
 #'   columns with whole-number values are treated as categories. Put
 #'   continuous columns in `balance`, or use [cut()] to make a factor if you
-#'   need exact counts within ranges.
+#'   need exact counts within ranges. A stratum whose share of the smallest
+#'   set is under one row (or group) can be missing from some sets. If more
+#'   than half of the strata are missing from at least one set, you get a
+#'   warning.
 #' @param group <[`tidy-select`][tidyselect::language]> One column with group
 #'   IDs. All rows of a group go to the same set. See Details.
 #' @param method The balancing method: `"anticlust"`, `"twinning"`,
@@ -39,8 +43,10 @@
 #'   * `covariances` (default `FALSE`): also balance the product of each
 #'     pair of `balance` columns.
 #'   * `k_neighbours` (default `Inf`): the number of nearest neighbours each
-#'     row may swap with. `Inf` tries every swap. A small number, such as
-#'     20, is faster on large data.
+#'     row may swap with. `Inf` tries every swap, so the run time grows
+#'     quickly with the number of rows. A small number, such as 20, is much
+#'     faster on large data, but categorical `balance` columns can end up
+#'     less balanced. Check the result with [balance_check()].
 #'   * `local_maximum` (default `TRUE`): repeat the exchange passes until a
 #'     pass makes no swap (at most 100 passes). `FALSE` runs one pass.
 #'   * `repetitions` (default 1): the number of random starts. The best
@@ -68,9 +74,9 @@
 #'   strata become sparse. Options are `n_bins` (default 4) and `pool`
 #'   (default 0.1): cells with less than this fraction of the rows are pooled.
 #'
-#' The method balances the columns left after standardizing: constant and
-#' nearly constant columns (standard deviation up to 1e-12) are dropped, and
-#' with `group`, so are columns whose group means are all equal (see Groups).
+#' The method balances the columns left after standardizing: constant columns
+#' are dropped, and with `group`, so are columns whose group means are all
+#' equal up to rounding error (see Groups).
 #' If none are left, for example with only `exact` columns and no `group`, the
 #' method doesn't run and the sets are drawn at random, within the `exact`
 #' strata if there are any. The limits the method itself checks, such as
@@ -186,6 +192,9 @@ balanced_vfold_cv <- function(
   splits <- vector("list", v * repeats)
   for (r in seq_len(repeats)) {
     a <- assign_balanced(prep, props, entry, options, call = call)
+    if (r == 1) {
+      warn_sparse_strata(prep, a, v, call = call)
+    }
     for (k in seq_len(v)) {
       splits[[(r - 1) * v + k]] <- rsample::make_splits(
         list(analysis = which(a != k), assessment = which(a == k)),
@@ -235,10 +244,12 @@ print.balanced_vfold_cv <- function(x, ...) {
 
 #' @export
 pretty.balanced_vfold_cv <- function(x, ...) {
-  paste(header_parts(x), collapse = ", ")
+  paste(header_parts(x, balance = FALSE), collapse = ", ")
 }
 
-header_parts <- function(x) {
+# `balance = FALSE` leaves out the balance columns, so that pretty() stays
+# short in the headers of other objects, such as nested_cv().
+header_parts <- function(x, balance = TRUE) {
   details <- attributes(x)
   res <- paste0(
     details$v,
@@ -249,8 +260,20 @@ header_parts <- function(x) {
   if (!is.null(details$repeats) && details$repeats > 1) {
     res <- paste(res, "repeated", details$repeats, "times")
   }
+  if (!balance) {
+    details$balance <- NULL
+  }
+  c(res, design_parts(details))
+}
+
+# One part per column, so a long list can wrap between column names.
+design_parts <- function(details) {
+  res <- character()
+  if (length(details$balance) > 0) {
+    bal <- details$balance
+    res <- c(res, paste("balancing", bal[1]), bal[-1])
+  }
   if (length(details$exact) > 0) {
-    # One part per column, so a long list can wrap between column names.
     exact <- details$exact
     res <- c(res, paste("stratified by", exact[1]), exact[-1])
   }
@@ -294,7 +317,7 @@ check_whole <- function(
 ) {
   ok <- is.numeric(x) &&
     length(x) == 1 &&
-    !is.na(x) &&
+    is.finite(x) &&
     x == round(x) &&
     x >= min &&
     x <= max
@@ -314,6 +337,22 @@ check_dots <- function(..., call = rlang::caller_env()) {
         "balancesample uses {.arg exact}, not {.arg strata}.",
         i = "Put categorical columns in {.arg exact}, for example {.code exact = class}.",
         i = "Put numeric columns in {.arg balance}."
+      ),
+      call = call
+    )
+  }
+  # rsample arguments with a counterpart in balancesample.
+  hints <- c(
+    pool = "{.code method = \"interaction\"} pools small cells with {.code options = list(pool = 0.1)}.",
+    breaks = "{.code method = \"interaction\"} sets the number of bins per numeric column with {.code options = list(n_bins = 4)}.",
+    times = "{.fn balanced_vfold_cv} takes {.arg repeats}, which repeats the whole V-fold partition."
+  )
+  used <- intersect(names(hints), ...names())
+  if (length(used) > 0) {
+    cli::cli_abort(
+      c(
+        "balancesample doesn't use {.arg {used}}.",
+        stats::setNames(hints[used], rep("i", length(used)))
       ),
       call = call
     )

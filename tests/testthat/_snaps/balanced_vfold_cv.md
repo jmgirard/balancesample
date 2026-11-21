@@ -102,6 +102,16 @@
     Condition
       Error in `balanced_vfold_cv()`:
       ! `v` (50) must not be more than the number of groups (38).
+    Code
+      balanced_vfold_cv(d, balance = x1, repeats = Inf)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! `repeats` must be a whole number of at least 1.
+    Code
+      balanced_vfold_cv(d, v = Inf, balance = x1)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! `v` must be a whole number of at least 2.
 
 ---
 
@@ -110,7 +120,8 @@
     Condition
       Error in `balanced_vfold_cv()`:
       ! Selected columns must not have missing values.
-      x Missing values in x1.
+      x Missing values in x1 (1 row).
+      i Drop those rows, or balance on a filled copy of the column and an indicator of which values were missing. See `vignette("balancesample")`.
 
 ---
 
@@ -144,6 +155,25 @@
       ! `...` must be empty.
       x Problematic argument:
       * folds = 5
+    Code
+      balanced_vfold_cv(d, balance = x1, pool = 0.2)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! balancesample doesn't use `pool`.
+      i `method = "interaction"` pools small cells with `options = list(pool = 0.1)`.
+    Code
+      balanced_vfold_cv(d, balance = x1, breaks = 4, times = 2)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! balancesample doesn't use `breaks` and `times`.
+      i `method = "interaction"` sets the number of bins per numeric column with `options = list(n_bins = 4)`.
+      i `balanced_vfold_cv()` takes `repeats`, which repeats the whole V-fold partition.
+    Code
+      balanced_initial_split(d, balance = x1, times = 2)
+    Condition
+      Error in `balanced_initial_split()`:
+      ! balancesample doesn't use `times`.
+      i `balanced_vfold_cv()` takes `repeats`, which repeats the whole V-fold partition.
 
 # bad data give clear errors
 
@@ -163,11 +193,27 @@
       Error in `balanced_vfold_cv()`:
       ! x has infinite values.
     Code
-      balanced_vfold_cv(data.frame(x = as.Date("2026-01-01") + 0:3), v = 2, balance = x)
+      balanced_vfold_cv(data.frame(x = c(1, Inf, 2, -Inf), y = 1:4), v = 2, balance = y,
+      exact = x)
     Condition
       Error in `balanced_vfold_cv()`:
-      ! `balance` columns must be numeric, logical, character, or factor.
-      x x is a <Date> object.
+      ! x has infinite values.
+    Code
+      balanced_vfold_cv(data.frame(x = as.complex(1:4)), v = 2, balance = x)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! `balance` columns must be numeric, logical, character, factor, Date, POSIXct, or difftime.
+      x x is a complex vector.
+
+# dates, date-times, and durations can be balanced
+
+    Code
+      balanced_vfold_cv(d, v = 3, balance = lt)
+    Condition
+      Error in `balanced_vfold_cv()`:
+      ! Selected columns must be plain vectors.
+      x lt is a matrix, data frame, or list column.
+      i Convert <POSIXlt> date-times with `as.POSIXct()`.
 
 # more anticlust options are checked
 
@@ -226,4 +272,14 @@
       ! Method "interaction" failed.
       Caused by error:
       ! `pool` must be a number from 0 up to (not including) 1.
+
+# most strata being too small gives one warning
+
+    Code
+      f <- balanced_vfold_cv(d, v = 10, balance = x, exact = age)
+    Condition
+      Warning in `balanced_vfold_cv()`:
+      68 of 68 `exact` strata are missing from at least one set.
+      i A stratum with at least 10 rows is in every set.
+      i Whole-number columns in `exact` are categories, and each value is a level: age. Put continuous columns in `balance`, or use `cut()`.
 

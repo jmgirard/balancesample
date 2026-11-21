@@ -73,7 +73,8 @@ folds <- balanced_vfold_cv(
   exact = site
 )
 folds
-#> # 5-fold balanced cross-validation (anticlust), stratified by site
+#> # 5-fold balanced cross-validation (anticlust), balancing age, income,
+#> # diagnosis, stratified by site
 #> # A tibble: 5 × 2
 #>   splits           id   
 #>   <list>           <chr>
@@ -163,6 +164,7 @@ collect_metrics(res)
 ``` r
 split <- balanced_initial_split(d, prop = 3 / 4, balance = c(age, income), method = "twinning")
 split
+#> # Balanced training/testing split (twinning), balancing age, income
 #> <Training/Testing/Total>
 #> <300/100/400>
 balance_check(split)
@@ -182,6 +184,7 @@ training/validation/testing split. Pass it to
 ``` r
 split3 <- balanced_initial_validation_split(d, prop = c(0.6, 0.2), balance = c(age, income))
 split3
+#> # Balanced training/validation/testing split (anticlust), balancing age, income
 #> <Training/Validation/Testing/Total>
 #> <240/80/80/400>
 balance_check(split3)
@@ -209,7 +212,8 @@ target proportions, so the number of rows per set is only approximate.
 d$person <- sample(1:80, n, TRUE)
 grouped <- balanced_vfold_cv(d, v = 5, balance = c(age, income), group = person)
 grouped
-#> # 5-fold balanced cross-validation (anticlust), grouped by person
+#> # 5-fold balanced cross-validation (anticlust), balancing age, income,
+#> # grouped by person
 #> # A tibble: 5 × 2
 #>   splits           id   
 #>   <list>           <chr>
@@ -236,11 +240,16 @@ balanced_vfold_cv(d, balance = c(age, income), method = "rerandomize", options =
 ```
 
 By default, anticlust tries every swap, so its run time grows quickly
-with the number of rows. In one test with 10 folds and four variables,
-it took 0.8 seconds for 1,000 rows, 2.3 seconds for 3,000 rows, and 8.3
-seconds for 10,000 rows. With `k_neighbours = 20`, the same runs took
-0.2, 0.6, and 1.1 seconds. Twinning took less than 0.2 seconds for all
-three.
+with the number of rows. In one test on one computer, with 10 folds and
+four numeric variables, it took 0.5 seconds for 1,000 rows, 3.7 seconds
+for 3,000 rows, 25 seconds for 10,000 rows, and 3.6 minutes for 30,000
+rows. With `k_neighbours = 20`, each row can only swap with its 20
+nearest neighbours, and the same runs took 0.3, 1.6, 4.1, and 11.7
+seconds. This costs little balance on numeric columns, but more on
+categorical ones. In a test with 5,000 rows and a categorical column in
+`balance`, the largest SMD of a numeric column was about 0.0002 either
+way, but that of a category rose from about 0.005 to about 0.1. Twinning
+took less than 0.5 seconds for all four sizes.
 
 ## Background
 
@@ -263,6 +272,9 @@ problem next to the other methods.
 
 - `groupdata2::fold()` makes folds that balance one numeric variable,
   stratify one categorical variable, and keep groups together.
+- `groupdata2::collapse_groups()` combines existing groups into fewer
+  groups that are similar in size and in several numeric and categorical
+  variables.
 - `splitTools::multi_strata()` makes one stratification variable from
   several variables, by crossing them or by k-means clustering.
 

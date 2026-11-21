@@ -87,6 +87,20 @@ test_that("balance_check() reports complete separation as Inf", {
   expect_equal(balance_check(s, x)$value[1], Inf)
 })
 
+test_that("SMDs don't depend on the units or the origin", {
+  x <- c(-2, -1, 1, 2, -1.5, 0.5)
+  smd <- function(v) {
+    s <- rsample::make_splits(
+      list(analysis = 1:3, assessment = 4:6),
+      data.frame(v = v)
+    )
+    balance_check(s, v)$value[1]
+  }
+  expect_equal(smd(x * 1e-14), smd(x))
+  expect_equal(smd(x * 1e14), smd(x))
+  expect_equal(smd(x + 1e12), smd(x))
+})
+
 test_that("balance_check() needs columns for plain rsample objects", {
   d <- sim_data()
   expect_snapshot(balance_check(rsample::vfold_cv(d, v = 3)), error = TRUE)
@@ -305,4 +319,174 @@ test_that("summary() handles empty and incomplete input", {
 
   # Rows with a missing or unknown statistic.
   expect_snapshot(summary(bc[c(NA, seq_len(nrow(bc))), ]), error = TRUE)
+})
+
+test_that("whole-number exact columns are checked as categories", {
+  d <- data.frame(code = rep(1:3, 20), x = seq_len(60))
+  set.seed(1)
+  folds <- balanced_vfold_cv(d, v = 3, balance = x, exact = code)
+  bc <- balance_check(folds)
+  expect_equal(bc$level[bc$variable %in% "code"], rep(c("1", "2", "3"), 3))
+
+  # A set with only code 2 differs from one with codes 1 and 3, although
+  # the means are equal.
+  d <- data.frame(code = c(2, 2, 2, 2, 1, 3, 1, 3), y = 1:8)
+  plain <- rsample::make_splits(list(analysis = 5:8, assessment = 1:4), d)
+  # Named columns from a plain split stay numeric.
+  expect_equal(balance_check(plain, code)$value[1], 0)
+  stored <- plain
+  attr(stored, "exact") <- "code"
+  bc <- balance_check(stored)
+  expect_equal(bc$value[bc$variable %in% "code" & bc$level == "2"], Inf)
+  # Naming a stored exact column keeps it categorical, with no variance
+  # ratio, and the energy distance matches that of a factor.
+  bc <- balance_check(stored, code, variance_ratio = TRUE)
+  expect_equal(bc$level[bc$statistic == "smd"], c("1", "2", "3"))
+  expect_false(any(bc$statistic == "variance_ratio"))
+  as_factor <- rsample::make_splits(
+    list(analysis = 5:8, assessment = 1:4),
+    transform(d, code = factor(code))
+  )
+  expect_equal(
+    bc$value[bc$statistic == "energy"],
+    balance_check(as_factor, code)$value[4]
+  )
+})
+
+test_that("the SMD plot of a three-way split tells the sets apart", {
+  skip_if_not_installed("ggplot2")
+  d <- sim_data()
+  set.seed(3)
+  s <- balanced_initial_validation_split(d, balance = c(x1, x2))
+  built <- ggplot2::ggplot_build(ggplot2::autoplot(balance_check(s)))
+  points <- built$data[[length(built$data)]]
+  expect_equal(length(unique(points$shape)), 2)
+  folds <- balanced_vfold_cv(d, v = 3, balance = c(x1, x2))
+  built <- ggplot2::ggplot_build(ggplot2::autoplot(balance_check(folds)))
+  expect_equal(length(unique(built$data[[length(built$data)]]$shape)), 1)
+})
+
+test_that("variance ratios show differences in spread", {
+  d <- data.frame(
+    x = c(-1, 1, -1, 1, -5, 5, -5, 5),
+    g = rep(c("a", "b"), 4),
+    k = c(1, 1, 1, 1, 2, 2, 2, 2)
+  )
+  s <- rsample::make_splits(list(analysis = 1:4, assessment = 5:8), d)
+  bc <- balance_check(s, x, g, k, variance_ratio = TRUE)
+  vr <- bc[bc$statistic == "variance_ratio", ]
+  # Only numeric variables get one.
+  expect_equal(vr$variable, c("x", "k"))
+  expect_equal(bc$value[bc$variable %in% "x" & bc$statistic == "smd"], 0)
+  expect_equal(vr$value[1], 25)
+  # Two zero variances give 1.
+  expect_equal(vr$value[2], 1)
+  expect_equal(summary(bc)$variance_ratio, 25)
+  expect_false("variance_ratio" %in% names(summary(balance_check(s, x))))
+
+  # A zero variance on one side gives 0 or Inf, and a set of one gives NA.
+  d <- data.frame(x = c(1, 2, 3, 4, 4, 4))
+  s <- rsample::make_splits(list(analysis = 1:3, assessment = 4:6), d)
+  bc <- balance_check(s, x, variance_ratio = TRUE)
+  expect_equal(bc$value[bc$statistic == "variance_ratio"], 0)
+  s <- rsample::make_splits(list(analysis = 4:6, assessment = 1:3), d)
+  bc <- balance_check(s, x, variance_ratio = TRUE)
+  expect_equal(bc$value[bc$statistic == "variance_ratio"], Inf)
+  s <- rsample::make_splits(list(analysis = 1:5, assessment = 6L), d)
+  bc <- balance_check(s, x, variance_ratio = TRUE)
+  expect_true(is.na(bc$value[bc$statistic == "variance_ratio"]))
+  expect_true(is.na(summary(bc)$variance_ratio))
+
+  # The ratio farthest from 1 on the log scale is summarized.
+  d <- data.frame(
+    x = c(-2, 2, -2, 2, -1, 1, -1, 1),
+    y = c(-1, 1, -1, 1, -1.5, 1.5, -1.5, 1.5)
+  )
+  s <- rsample::make_splits(list(analysis = 1:4, assessment = 5:8), d)
+  expect_equal(
+    summary(balance_check(s, x, y, variance_ratio = TRUE))$variance_ratio,
+    0.25
+  )
+
+  expect_snapshot(balance_check(s, x, variance_ratio = NA), error = TRUE)
+})
+
+test_that("variance ratios work for every kind of object", {
+  d <- sim_data()
+  set.seed(4)
+  folds <- balanced_vfold_cv(d, v = 3, balance = c(x1, cat))
+  bc <- balance_check(folds, variance_ratio = TRUE)
+  expect_equal(sum(bc$statistic == "variance_ratio"), 3)
+  s3 <- balanced_initial_validation_split(d, balance = x1)
+  bc <- balance_check(s3, variance_ratio = TRUE)
+  expect_equal(
+    bc$id[bc$statistic == "variance_ratio"],
+    c("Validation", "Testing")
+  )
+  expect_output(print(bc), "Balance check: 2 splits")
+  skip_if_not_installed("ggplot2")
+  expect_s3_class(ggplot2::autoplot(bc), "ggplot")
+})
+
+test_that("each split of an rset is checked on its own data", {
+  a <- rsample::make_splits(
+    list(analysis = 1:4, assessment = 5:8),
+    data.frame(x = rep(0:1, each = 4))
+  )
+  b <- rsample::make_splits(
+    list(analysis = 1:4, assessment = 5:8),
+    data.frame(x = rep(0:1, 4))
+  )
+  r <- rsample::manual_rset(list(a, b), c("First", "Second"))
+  s <- summary(balance_check(r, x))
+  expect_equal(s$max_abs_smd, c(Inf, 0))
+  expect_equal(s$energy[2], 0)
+})
+
+test_that("small differences far from the origin are measured", {
+  t0 <- as.POSIXct("2026-01-01", tz = "UTC")
+  # Microseconds on a date-time in seconds.
+  d <- data.frame(t = t0 + c(0, 10, 0, 10, 10, 30, 10, 30) / 1e6)
+  s <- rsample::make_splits(list(analysis = 1:4, assessment = 5:8), d)
+  bc <- balance_check(s, t, variance_ratio = TRUE)
+  d0 <- data.frame(t = c(0, 10, 0, 10, 10, 30, 10, 30))
+  s0 <- rsample::make_splits(list(analysis = 1:4, assessment = 5:8), d0)
+  expect_equal(bc$value, balance_check(s0, t, variance_ratio = TRUE)$value)
+  expect_equal(ncol(build_balance_matrix(d)), 1)
+})
+
+test_that("a gap between the sets doesn't hide the spread within them", {
+  # Spreads of 1e-7 seconds at the epoch, against a set in 2026.
+  d <- data.frame(
+    t = as.POSIXct(
+      c(0, 1e-7, 2e-7, 0, rep(1767225600, 4)),
+      origin = "1970-01-01",
+      tz = "UTC"
+    )
+  )
+  x <- as.numeric(d$t)
+  # The 2026 set has no spread.
+  smd <- (x[5] - mean(x[1:4])) / sqrt(var(x[1:4]) / 2)
+  s <- rsample::make_splits(list(analysis = 1:4, assessment = 5:8), d)
+  expect_equal(balance_check(s, t)$value[1], smd)
+  # Swapping the sets flips the sign but keeps the size.
+  r <- rsample::make_splits(list(analysis = 5:8, assessment = 1:4), d)
+  expect_equal(balance_check(r, t)$value[1], -smd)
+
+  # Zero spread on one side gives a variance ratio of 0.
+  bc <- balance_check(s, t, variance_ratio = TRUE)
+  expect_equal(bc$value[bc$statistic == "variance_ratio"], 0)
+})
+
+test_that("every split of an rset must have the columns to check", {
+  a <- rsample::make_splits(
+    list(analysis = 1:4, assessment = 5:8),
+    data.frame(x = 1:8, y = 1:8)
+  )
+  b <- rsample::make_splits(
+    list(analysis = 1:4, assessment = 5:8),
+    data.frame(y = 1:8)
+  )
+  r <- rsample::manual_rset(list(a, b), c("A", "B"))
+  expect_snapshot(balance_check(r, x), error = TRUE)
 })

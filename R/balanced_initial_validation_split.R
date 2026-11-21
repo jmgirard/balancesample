@@ -120,6 +120,7 @@ balanced_initial_validation_split <- function(
     props <- method_options$parts / sum(method_options$parts)
   }
   a <- assign_balanced(prep, props, entry, method_options, call = call)
+  warn_sparse_strata(prep, a, length(props), call = call)
   res <- list(
     data = data,
     train_id = which(a == 1L),
@@ -143,4 +144,19 @@ balanced_initial_validation_split <- function(
     "three_way_split"
   )
   res
+}
+
+#' @export
+print.balanced_initial_validation_split <- function(x, ...) {
+  details <- attr(x, "val_att")
+  cat_header(c(
+    paste0(
+      "Balanced training/validation/testing split (",
+      details$method,
+      ")"
+    ),
+    design_parts(details)
+  ))
+  NextMethod()
+  invisible(x)
 }

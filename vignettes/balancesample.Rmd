@@ -103,6 +103,8 @@ A categorical column can go in either argument. Use `exact` when you need the co
 
 Continuous columns belong in `balance`. If you need exact counts within ranges of a continuous column, make a factor of those ranges and put that in `exact`. Base R has `cut()`. In the tidyverse, `ggplot2::cut_number()` makes ranges with about the same number of rows, and `ggplot2::cut_interval()` and `ggplot2::cut_width()` make ranges of the same width. `dplyr::ntile()` also works: it returns whole numbers, which `exact` treats as categories.
 
+What about the outcome? In rsample, `strata` is usually the outcome, so that every set has a similar mix of outcomes. You can do the same here. A numeric outcome can go in `balance`, next to the predictors, and a class outcome can go in `exact` if the class counts matter and every class has enough rows for every set. The outcome is used only to assign rows to sets, as with `strata`. This assumes you have the outcome when you make the split. If the evaluation must hold out whole time periods or whole sites, split by those instead: put the site in `group`, or use rsample's time-based splits. In this article, the outcome depends on age, income, and diagnosis, so balancing those already keeps the outcome similar across the sets, and it is left out.
+
 Each column you add to `exact` splits the strata further. Here diagnosis and site together make 9 strata:
 
 ```{r crossed}
@@ -116,6 +118,33 @@ small_train <- round(0.8 * min(tab))
 ```
 
 The smallest stratum is `r rownames(tab)[small[1]]` cases at site `r colnames(tab)[small[2]]`, with `r min(tab)` patients. After an 80% training split, `r small_train` of them are spread over 5 folds, so each fold gets `r floor(small_train / 5)` or `r ceiling(small_train / 5)`. A stratum with fewer rows than folds is missing from some folds. Small strata also leave the method less room to balance the other columns.
+
+### Missing values
+
+The columns in `balance`, `exact`, and `group` must not have missing values. If a `balance` column has some, you can balance on a filled copy of it and on an indicator of which values were missing. Here, 30 incomes are missing. The median fills them, and `income_missing` makes sure the missing incomes are spread over the folds too:
+
+```{r missing}
+d_na <- d
+d_na$income[sample(n, 30)] <- NA
+d_na$income_filled <- d_na$income
+d_na$income_filled[is.na(d_na$income)] <- median(d_na$income, na.rm = TRUE)
+d_na$income_missing <- is.na(d_na$income)
+folds_na <- balanced_vfold_cv(
+  d_na,
+  v = 10,
+  balance = c(age, income_filled, income_missing),
+  exact = c(diagnosis, site)
+)
+```
+
+The filled copy is only for making the split. Your model can handle the missing values its own way, for example with a recipe. `balance_check()` drops missing values variable by variable, so you can check the original column:
+
+```{r missing-check}
+na_check <- balance_check(folds_na, age, income, income_missing)
+summary(na_check)
+```
+
+For a categorical column, you can instead make a copy with its own level for missing values, for example with `forcats::fct_na_value_to_level()`, and put that in `balance` or `exact`.
 
 ## A full tidymodels workflow
 
@@ -218,7 +247,7 @@ shown
 
 In this run, `r by_method$method[which.min(by_method$max_abs_smd)]` had the smallest `max_abs_smd` (`r round(min(by_method$max_abs_smd), 3)`), and `r by_method$method[which.min(by_method$mean_energy)]` had the smallest `mean_energy` (`r round(min(by_method$mean_energy), 3)`). These come from one run of each method on one data set, so they don't show which method does best in general, and small differences may be noise.
 
-Start with anticlust. On large data, set `options = list(k_neighbours = 20)` or try twinning, then check the balance again. The README lists run times for both. See `?balanced_vfold_cv` for the options of each method.
+Start with anticlust. On large data, set `options = list(k_neighbours = 20)` or try twinning, then check the balance again. With `k_neighbours = 20`, look at the categorical columns in particular: in one test with 5,000 rows, their largest SMD rose from about 0.005 to about 0.1, while the numeric columns stayed as well balanced. The README lists run times for both. See `?balanced_vfold_cv` for the options of each method.
 
 ## Groups
 

@@ -2,8 +2,9 @@
 #'
 #' Plot the output of [balance_check()]. `type = "smd"` shows the
 #' standardized mean difference of each variable in each split, with dashed
-#' lines at -0.1 and 0.1. `type = "energy"` shows the energy distance of each
-#' split.
+#' lines at -0.1 and 0.1. For a three-way split, the validation and testing
+#' sets have different shapes. `type = "energy"` shows the energy distance of
+#' each split.
 #'
 #' @param object A `balance_check` object.
 #' @param type `"smd"` or `"energy"`.
@@ -39,11 +40,23 @@ autoplot.balance_check <- function(object, type = c("smd", "energy"), ...) {
         linetype = "dashed",
         colour = "grey50"
       ) +
-      ggplot2::geom_point(alpha = 0.6) +
       ggplot2::labs(
         x = "Standardized mean difference (assessment - analysis)",
         y = NULL
       )
+    # A three-way split has two comparisons, told apart by shape.
+    if (!has_id2 && setequal(df$id, c("Validation", "Testing"))) {
+      df$id <- factor(df$id, levels = c("Validation", "Testing"))
+      p <- p +
+        ggplot2::geom_point(
+          ggplot2::aes(shape = .data$id),
+          data = df,
+          alpha = 0.6
+        ) +
+        ggplot2::labs(shape = NULL)
+    } else {
+      p <- p + ggplot2::geom_point(alpha = 0.6)
+    }
     return(p)
   }
 

@@ -57,7 +57,11 @@ test_that("exact strata follow the actual fold sizes", {
   d <- data.frame(s = factor(rep(letters[1:3], c(2, 5, 3))))
   for (seed in 1:20) {
     set.seed(seed)
-    folds <- balanced_vfold_cv(d, v = 4, exact = s, method = "interaction")
+    # Two of the three strata have fewer rows than folds, on purpose.
+    expect_warning(
+      folds <- balanced_vfold_cv(d, v = 4, exact = s, method = "interaction"),
+      class = "balancesample_sparse_strata"
+    )
     expect_true(shares_respected(folds, d$s))
     expect_true(strata_exact(folds, d$s))
   }
@@ -432,6 +436,8 @@ test_that("bad inputs give clear errors", {
     balanced_vfold_cv(d, balance = c(x1, id), group = id)
     balanced_vfold_cv(d, balance = x1, group = c(id, sex))
     balanced_vfold_cv(d, v = 50, balance = x1, group = id)
+    balanced_vfold_cv(d, balance = x1, repeats = Inf)
+    balanced_vfold_cv(d, v = Inf, balance = x1)
   })
   d$x1[3] <- NA
   expect_snapshot(balanced_vfold_cv(d, balance = x1), error = TRUE)
@@ -445,6 +451,9 @@ test_that("strata and other extra arguments are rejected", {
     balanced_vfold_cv(d, balance = x1, strata = cat)
     balanced_initial_split(d, balance = x1, strata = cat)
     balanced_vfold_cv(d, balance = x1, folds = 5)
+    balanced_vfold_cv(d, balance = x1, pool = 0.2)
+    balanced_vfold_cv(d, balance = x1, breaks = 4, times = 2)
+    balanced_initial_split(d, balance = x1, times = 2)
   })
 })
 
@@ -479,6 +488,8 @@ test_that("print shows the method and design", {
     "3-fold balanced cross-validation \\(rerandomize\\)"
   )
   expect_match(pretty(folds), "stratified by site, grouped by id")
+  # pretty() leaves out the balance columns, which print() shows.
+  expect_no_match(pretty(folds), "balancing")
   expect_output(print(folds), "balanced cross-validation")
 
   # A long header wraps between its parts.
@@ -488,18 +499,18 @@ test_that("print shows the method and design", {
     header,
     c(
       "# 3-fold balanced cross-validation (rerandomize),",
-      "# stratified by site, grouped by id"
+      "# balancing x1, stratified by site, grouped by id"
     )
   )
   # A header that fits exactly stays on one line.
-  full <- paste0("# ", pretty(folds))
+  full <- paste0("# ", paste(header_parts(folds), collapse = ", "))
   withr::local_options(width = nchar(full))
   expect_equal(utils::capture.output(print(folds))[1], full)
   withr::local_options(width = nchar(full) - 1)
   expect_equal(
     utils::capture.output(print(folds))[1:2],
     c(
-      "# 3-fold balanced cross-validation (rerandomize), stratified by site,",
+      "# 3-fold balanced cross-validation (rerandomize), balancing x1, stratified by site,",
       "# grouped by id"
     )
   )
@@ -524,10 +535,10 @@ test_that("print wraps long lists of exact columns by display width", {
   header <- grep("^# ", utils::capture.output(print(folds)), value = TRUE)
   header <- header[seq_len(length(header) - 1)]
   expect_true(all(nchar(header, type = "width") <= 60))
-  expect_equal(header[2], "# stratified by site, sex, sex2,")
+  expect_equal(header[2], "# balancing x1, stratified by site, sex, sex2,")
   expect_equal(
     paste(sub("^# ", "", header), collapse = " "),
-    pretty(folds)
+    paste(header_parts(folds), collapse = ", ")
   )
 })
 
@@ -537,11 +548,82 @@ test_that("bad data give clear errors", {
     balanced_vfold_cv(data.frame(x = 1), balance = x)
     balanced_vfold_cv(data.frame(x = c(1, Inf, 3, 4)), v = 2, balance = x)
     balanced_vfold_cv(
-      data.frame(x = as.Date("2026-01-01") + 0:3),
+      data.frame(x = c(1, Inf, 2, -Inf), y = 1:4),
       v = 2,
-      balance = x
+      balance = y,
+      exact = x
     )
+    balanced_vfold_cv(data.frame(x = as.complex(1:4)), v = 2, balance = x)
   })
+})
+
+test_that("dates, date-times, and durations can be balanced", {
+  set.seed(1)
+  d <- data.frame(
+    day = as.Date("2020-01-01") + sample(0:1000, 60),
+    x = stats::rnorm(60)
+  )
+  d$time <- as.POSIXct("2020-01-01", tz = "UTC") + d$x * 1e5
+  d$days <- as.difftime(d$x * 3, units = "days")
+  d$hours <- as.difftime(d$x * 72, units = "hours")
+  set.seed(2)
+  a <- balanced_vfold_cv(d, v = 3, balance = c(day, time, days))
+  set.seed(2)
+  b <- balanced_vfold_cv(d, v = 3, balance = c(day, time, hours))
+  # The same durations in other units give the same folds.
+  expect_identical(
+    lapply(a$splits, rsample::complement),
+    lapply(b$splits, rsample::complement)
+  )
+  expect_s3_class(rsample::analysis(a$splits[[1]])$day, "Date")
+  bc <- balance_check(a)
+  expect_equal(
+    unique(bc$variable[bc$statistic == "smd"]),
+    c("day", "time", "days")
+  )
+  expect_false(anyNA(bc$value))
+
+  d$lt <- as.POSIXlt(d$time)
+  expect_snapshot(balanced_vfold_cv(d, v = 3, balance = lt), error = TRUE)
+})
+
+test_that("group means that are equal up to rounding are dropped", {
+  # Every group has a mean of 5, so the groups are assigned at random, and
+  # the units of x don't matter.
+  d <- data.frame(
+    x = c(1, 9, 2, 8, 3, 7, 4, 6, 5, 5, 0, 10),
+    g = rep(1:6, each = 2)
+  )
+  for (seed in 1:30) {
+    set.seed(seed)
+    a <- balanced_initial_split(d, prop = 0.5, balance = x, group = g)
+    set.seed(seed)
+    b <- balanced_initial_split(
+      transform(d, x = x / 10),
+      prop = 0.5,
+      balance = x,
+      group = g
+    )
+    expect_identical(a$in_id, b$in_id)
+  }
+})
+
+test_that("derived anticlust features that are constant are dropped", {
+  # x * (1 / x) is constant, up to rounding, after standardizing.
+  x <- c(1, 2, 4, 5, 8, 10, -1, -2, -4, -5, -8, -10)
+  features <- kplus_features(
+    build_balance_matrix(data.frame(x = x, y = 1 / x)),
+    moments = 2,
+    covariances = TRUE
+  )
+  expect_equal(ncol(features), 4)
+})
+
+test_that("near-constant columns are judged relative to their size", {
+  x <- c(-2, -1, 1, 2, -1.5, 0.5)
+  expect_equal(ncol(build_balance_matrix(data.frame(x = x * 1e-14))), 1)
+  expect_equal(ncol(build_balance_matrix(data.frame(x = rep(0.1, 6)))), 0)
+  expect_equal(ncol(build_balance_matrix(data.frame(x = rep(3e12, 6)))), 0)
 })
 
 test_that("more anticlust options are checked", {
@@ -756,5 +838,49 @@ test_that("option names must not be missing", {
     ),
     "unique names",
     class = "rlang_error"
+  )
+})
+
+test_that("most strata being too small gives one warning", {
+  set.seed(1)
+  d <- data.frame(x = stats::rnorm(200), age = sample(18:90, 200, TRUE))
+  expect_snapshot(f <- balanced_vfold_cv(d, v = 10, balance = x, exact = age))
+  # One warning even with repeats.
+  n_warn <- 0
+  withCallingHandlers(
+    balanced_vfold_cv(d, v = 10, repeats = 2, balance = x, exact = age),
+    warning = function(cnd) {
+      n_warn <<- n_warn + 1
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_equal(n_warn, 1)
+  # The smallest set counts: 10 rows per stratum is enough for 10 folds.
+  d$s <- rep(1:20, each = 10)
+  expect_no_warning(balanced_vfold_cv(d, v = 10, balance = x, exact = s))
+  # With 8 testing rows, at least 12 of the 20 strata miss the testing set.
+  expect_warning(
+    balanced_initial_split(d, prop = 0.96, balance = x, exact = s),
+    class = "balancesample_sparse_strata"
+  )
+  # One testing row per stratum: 1 - 0.8 is a little under 0.2, but every
+  # stratum is still in both sets.
+  d4 <- data.frame(s = rep(letters[1:4], each = 5))
+  expect_no_warning(balanced_initial_split(d4, prop = 0.8, exact = s))
+  expect_no_warning(balanced_initial_split(d4, prop = 0.81, exact = s))
+  # With groups, strata are counted in groups.
+  d$id <- rep(1:40, each = 5)
+  d$site <- d$id %% 2
+  expect_no_warning(balanced_vfold_cv(
+    d,
+    v = 10,
+    balance = x,
+    exact = site,
+    group = id
+  ))
+  d$site <- d$id %% 8
+  expect_warning(
+    balanced_vfold_cv(d, v = 10, balance = x, exact = site, group = id),
+    class = "balancesample_sparse_strata"
   )
 })

@@ -191,3 +191,27 @@ test_that("grouped initial splits need two groups", {
     error = TRUE
   )
 })
+
+test_that("print shows the method and the columns", {
+  d <- sim_data()
+  withr::local_options(width = 100)
+  set.seed(1)
+  s <- balanced_initial_split(d, balance = c(x1, x2), exact = site, group = id)
+  out <- utils::capture.output(printed <- print(s))
+  expect_equal(
+    out[1:2],
+    c(
+      "# Balanced training/testing split (anticlust), balancing x1, x2, stratified by site, grouped by id",
+      "<Training/Testing/Total>"
+    )
+  )
+  expect_identical(printed, s)
+
+  # The empty fallback of a calibration split has no header.
+  empty <- rsample::make_splits(d, d[0, ])
+  class(empty) <- class(s)
+  expect_equal(
+    utils::capture.output(print(empty))[1],
+    "<Training/Testing/Total>"
+  )
+})

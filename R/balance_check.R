@@ -17,6 +17,8 @@
 #'   `x` are used. For `summary()`, not used and must be empty.
 #' @param max_n The largest number of rows per set for the energy distance.
 #'   Larger sets are subsampled at random to keep memory use low.
+#' @param variance_ratio If `TRUE`, also report the variance ratio of each
+#'   numeric variable.
 #'
 #' @details
 #' For a numeric variable, the SMD is the difference in means (assessment
@@ -27,7 +29,21 @@
 #' have zero variance but different means, the SMD is `Inf` or `-Inf`; the
 #' plot shows these values at the edge of the panel.
 #'
-#' Missing values are dropped variable by variable for the SMD. The energy
+#' Stored `exact` columns with whole numbers are treated as categories, as
+#' the split functions treat them, so they get one SMD per level and no
+#' variance ratio. This holds whether you name them or not. Other
+#' whole-number columns are numeric.
+#'
+#' With `variance_ratio = TRUE`, each numeric variable also gets the variance
+#' of the assessment set divided by the variance of the analysis set. It is 1
+#' when the spreads are equal, and values between 0.5 and 2 are often taken
+#' as good balance. The SMD can be 0 while the spreads differ, and the
+#' variance ratio shows which variable differs. A variance within rounding
+#' error of zero counts as zero: if both are zero, the ratio is 1, and if one
+#' is, it is 0 or `Inf`. With fewer than two values in a set, it is `NA`.
+#'
+#' Missing values are dropped variable by variable for the SMD and the
+#' variance ratio. The energy
 #' distance uses the rows that have no missing values in any checked column.
 #'
 #' The energy distance is the V-statistic
@@ -38,13 +54,16 @@
 #' Use `summary()` on the result to get one row per split.
 #'
 #' @return A tibble with class `balance_check`. It has the ID columns of `x`,
-#'   and the columns `variable`, `level`, `statistic` (`"smd"` or `"energy"`),
-#'   and `value`. Energy rows have `NA` in `variable` and `level`.
+#'   and the columns `variable`, `level`, `statistic` (`"smd"`, `"energy"`, or
+#'   `"variance_ratio"`), and `value`. Energy rows have `NA` in `variable` and
+#'   `level`.
 #'
 #'   `summary()` returns a tibble with one row per split. It has the ID
 #'   columns, `max_abs_smd` (the largest absolute SMD in the split), the
 #'   `variable` and `level` with that SMD (the first one if several tie), and
-#'   `energy`. If the split has no SMD that isn't missing, `max_abs_smd`,
+#'   `energy`. With variance ratios, it also has `variance_ratio`, the ratio
+#'   farthest from 1 on the log scale (so 0.25 is farther than 3). If the
+#'   split has no SMD that isn't missing, `max_abs_smd`,
 #'   `variable`, and `level` are `NA`. If it has no energy row, `energy` is
 #'   `NA`. Each split must have its own ID, so no ID may have more than one
 #'   energy row. Only the ID columns that `balance_check()` made are used, so
@@ -56,16 +75,22 @@
 #' folds <- balanced_vfold_cv(mtcars, v = 4, balance = c(mpg, hp, wt))
 #' balance_check(folds)
 #' summary(balance_check(folds))
+#' summary(balance_check(folds, variance_ratio = TRUE))
 #'
 #' # Compare with ordinary folds
 #' summary(balance_check(rsample::vfold_cv(mtcars, v = 4), mpg, hp, wt))
 #' @export
-balance_check <- function(x, ..., max_n = 2000) {
+balance_check <- function(x, ..., max_n = 2000, variance_ratio = FALSE) {
   UseMethod("balance_check")
 }
 
 #' @export
-balance_check.default <- function(x, ..., max_n = 2000) {
+balance_check.default <- function(
+  x,
+  ...,
+  max_n = 2000,
+  variance_ratio = FALSE
+) {
   cli::cli_abort(
     "{.arg x} must be an {.cls rset}, an {.cls rsplit}, or a {.cls three_way_split}, not {.obj_type_friendly {x}}."
   )
@@ -73,18 +98,39 @@ balance_check.default <- function(x, ..., max_n = 2000) {
 
 #' @rdname balance_check
 #' @export
-balance_check.rset <- function(x, ..., max_n = 2000) {
+balance_check.rset <- function(
+  x,
+  ...,
+  max_n = 2000,
+  variance_ratio = FALSE
+) {
   check_whole(max_n, min = 2)
+  check_flag(variance_ratio)
   if (nrow(x) == 0) {
     cli::cli_abort("{.arg x} has no splits.")
   }
-  data <- x$splits[[1]]$data
-  cols <- check_columns(data, x, ...)
+  # The columns are selected in the first split. The splits of a
+  # manual_rset() can have different data, so check that the others have them.
+  cols <- check_columns(x$splits[[1]]$data, x, ...)
+  for (i in seq_len(nrow(x))) {
+    lacking <- setdiff(cols, names(x$splits[[i]]$data))
+    if (length(lacking) > 0) {
+      cli::cli_abort(
+        c(
+          "Every split of {.arg x} must have the columns to check.",
+          x = "Split {i} has no {.field {lacking}}."
+        )
+      )
+    }
+  }
   id_cols <- grep("^id", names(x), value = TRUE)
   ids <- tibble::as_tibble(as.data.frame(x)[id_cols])
 
   res <- lapply(seq_len(nrow(x)), function(i) {
-    out <- split_balance(x$splits[[i]], cols, max_n)
+    # Splits of a manual_rset() can have different data.
+    split <- x$splits[[i]]
+    data <- exact_as_factors(split$data, x, cols)
+    out <- split_balance(split, cols, max_n, data, variance_ratio)
     id_rows <- ids[rep(i, nrow(out)), , drop = FALSE]
     cbind(id_rows, out)
   })
@@ -93,18 +139,37 @@ balance_check.rset <- function(x, ..., max_n = 2000) {
 
 #' @rdname balance_check
 #' @export
-balance_check.rsplit <- function(x, ..., max_n = 2000) {
+balance_check.rsplit <- function(
+  x,
+  ...,
+  max_n = 2000,
+  variance_ratio = FALSE
+) {
   check_whole(max_n, min = 2)
+  check_flag(variance_ratio)
   cols <- check_columns(x$data, x, ...)
-  out <- split_balance(x, cols, max_n)
+  out <- split_balance(
+    x,
+    cols,
+    max_n,
+    exact_as_factors(x$data, x, cols),
+    variance_ratio
+  )
   new_balance_check(cbind(tibble::tibble(id = rep("Split", nrow(out))), out))
 }
 
 #' @rdname balance_check
 #' @export
-balance_check.three_way_split <- function(x, ..., max_n = 2000) {
+balance_check.three_way_split <- function(
+  x,
+  ...,
+  max_n = 2000,
+  variance_ratio = FALSE
+) {
   check_whole(max_n, min = 2)
+  check_flag(variance_ratio)
   cols <- check_columns(x$data, x, ...)
+  data <- exact_as_factors(x$data, x, cols)
   test_id <- setdiff(seq_len(nrow(x$data)), c(x$train_id, x$val_id))
   res <- lapply(
     list(Validation = x$val_id, Testing = test_id),
@@ -113,7 +178,7 @@ balance_check.three_way_split <- function(x, ..., max_n = 2000) {
         list(analysis = x$train_id, assessment = out_id),
         data = x$data
       )
-      split_balance(split, cols, max_n)
+      split_balance(split, cols, max_n, data, variance_ratio)
     }
   )
   ids <- rep(names(res), vapply(res, nrow, integer(1)))
@@ -129,8 +194,7 @@ check_columns <- function(data, x, ..., call = rlang::caller_env()) {
   )
   cols <- names(pos)
   if (length(cols) == 0) {
-    # Three-way splits keep their arguments in `val_att`.
-    stored <- attr(x, "val_att") %||% attributes(x)
+    stored <- stored_args(x)
     cols <- unique(c(stored$balance, stored$exact))
   }
   if (length(cols) == 0) {
@@ -145,8 +209,29 @@ check_columns <- function(data, x, ..., call = rlang::caller_env()) {
   cols
 }
 
-split_balance <- function(split, cols, max_n) {
-  data <- split$data
+# Three-way splits keep their arguments in `val_att`.
+stored_args <- function(x) {
+  attr(x, "val_att") %||% attributes(x)
+}
+
+# The split functions treat whole-number `exact` columns as categories, so
+# the check does too, with one SMD per level.
+exact_as_factors <- function(data, x, cols) {
+  for (nm in intersect(cols, stored_args(x)$exact)) {
+    if (is.numeric(data[[nm]])) {
+      data[[nm]] <- factor(data[[nm]])
+    }
+  }
+  data
+}
+
+split_balance <- function(
+  split,
+  cols,
+  max_n,
+  data = split$data,
+  variance_ratio = FALSE
+) {
   an <- split$in_id
   as <- rsample::complement(split)
 
@@ -175,12 +260,25 @@ split_balance <- function(split, cols, max_n) {
         value = unname(vals)
       ))
     }
-    tibble::tibble(
+    v <- as.numeric(as_balance_numeric(v))
+    out <- tibble::tibble(
       variable = nm,
       level = NA_character_,
       statistic = "smd",
-      value = smd_value(as.numeric(v[as]), as.numeric(v[an]))
+      value = smd_value(v[as], v[an])
     )
+    if (variance_ratio) {
+      out <- rbind(
+        out,
+        tibble::tibble(
+          variable = nm,
+          level = NA_character_,
+          statistic = "variance_ratio",
+          value = variance_ratio_value(v[as], v[an])
+        )
+      )
+    }
+    out
   })
 
   keep <- which(stats::complete.cases(data[cols]))
@@ -212,24 +310,63 @@ smd_value <- function(a, b, binary = FALSE) {
   if (length(a) == 0 || length(b) == 0) {
     return(NA_real_)
   }
-  diff <- mean(a) - mean(b)
   if (binary) {
     pa <- mean(a)
     pb <- mean(b)
+    diff <- pa - pb
     den <- sqrt((pa * (1 - pa) + pb * (1 - pb)) / 2)
+    tol <- near_zero(1)
   } else {
-    va <- if (length(a) > 1) stats::var(a) else 0
-    vb <- if (length(b) > 1) stats::var(b) else 0
-    den <- sqrt((va + vb) / 2)
+    # Each variance is measured within its own set, before the shift below.
+    den <- sqrt((set_variance(a) + set_variance(b)) / 2)
+    # Measure from an observed value, so that a large origin (such as a
+    # date-time in seconds) doesn't swamp small differences.
+    ref <- c(a, b)[1]
+    a <- a - ref
+    b <- b - ref
+    diff <- mean(a) - mean(b)
+    tol <- near_zero(max(abs(c(a, b))))
   }
-  # Tolerances are relative to the size of the values, so the result does not
-  # depend on the units.
-  tol <- 1e-12 * max(abs(c(a, b)))
-  if (den <= tol) {
+  if (den == 0) {
     return(if (abs(diff) <= tol) 0 else sign(diff) * Inf)
   }
   out <- diff / den
   if (abs(out) < 1e-12) 0 else out
+}
+
+# Variance of one set, or 0 if it is within rounding error of zero. Each set
+# is measured from its own first value, so a gap between the sets doesn't
+# hide the spread within them.
+set_variance <- function(a) {
+  if (length(a) < 2) {
+    return(0)
+  }
+  a <- a - a[1]
+  v <- stats::var(a)
+  if (v <= near_zero(max(abs(a)))^2) 0 else v
+}
+
+# Variance of `a` over the variance of `b`. A variance within rounding error
+# of zero counts as zero: two zeros give 1, and a zero over a variance above
+# zero gives 0 (or Inf the other way round).
+variance_ratio_value <- function(a, b) {
+  a <- a[!is.na(a)]
+  b <- b[!is.na(b)]
+  if (length(a) < 2 || length(b) < 2) {
+    return(NA_real_)
+  }
+  va <- set_variance(a)
+  vb <- set_variance(b)
+  if (va == 0 && vb == 0) {
+    return(1)
+  }
+  if (vb == 0) {
+    return(Inf)
+  }
+  if (va == 0) {
+    return(0)
+  }
+  va / vb
 }
 
 energy_distance <- function(a, b, max_n = 2000) {
@@ -298,9 +435,10 @@ summary.balance_check <- function(object, ...) {
       )
     )
   }
-  if (!all(x$statistic %in% c("smd", "energy"))) {
+  stats <- c("smd", "energy", "variance_ratio")
+  if (!all(x$statistic %in% stats)) {
     cli::cli_abort(
-      "{.code statistic} must be {.val smd} or {.val energy} in every row of {.arg object}."
+      "{.code statistic} must be {.or {.val {stats}}} in every row of {.arg object}."
     )
   }
   # Integer codes keep `NA` apart from "NA" and can't collide when pasted.
@@ -341,5 +479,19 @@ summary.balance_check <- function(object, ...) {
   out$variable <- x$variable[worst]
   out$level <- x$level[worst]
   out$energy <- unname(energy)
+  if (any(x$statistic == "variance_ratio")) {
+    out$variance_ratio <- unname(vapply(
+      rows,
+      function(i) {
+        vr <- x$value[i][x$statistic[i] == "variance_ratio"]
+        vr <- vr[!is.na(vr)]
+        if (length(vr) == 0) {
+          return(NA_real_)
+        }
+        vr[which.max(abs(log(vr)))]
+      },
+      numeric(1)
+    ))
+  }
   out
 }

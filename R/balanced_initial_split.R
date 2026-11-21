@@ -95,6 +95,7 @@ balanced_initial_split <- function(
     props <- method_options$parts / sum(method_options$parts)
   }
   a <- assign_balanced(prep, props, entry, method_options, call = call)
+  warn_sparse_strata(prep, a, length(props), call = call)
   res <- rsample::make_splits(
     list(analysis = which(a == 1L), assessment = which(a == 2L)),
     data = data,
@@ -113,4 +114,18 @@ balanced_initial_split <- function(
     attr(res, nm) <- attrib[[nm]]
   }
   res
+}
+
+#' @export
+print.balanced_initial_split <- function(x, ...) {
+  details <- attributes(x)
+  # The empty fallback of an inner calibration split stores no arguments.
+  if (!is.null(details$method)) {
+    cat_header(c(
+      paste0("Balanced training/testing split (", details$method, ")"),
+      design_parts(details)
+    ))
+  }
+  NextMethod()
+  invisible(x)
 }

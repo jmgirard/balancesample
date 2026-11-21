@@ -141,7 +141,10 @@ kplus_features <- function(x, moments, covariances) {
     pairs <- which(upper.tri(diag(ncol(x))), arr.ind = TRUE)
     f <- cbind(f, x[, pairs[, 1], drop = FALSE] * x[, pairs[, 2], drop = FALSE])
   }
-  standardize_matrix(unname(as.matrix(f)))
+  # The features are computed from standardized columns, so rounding error is
+  # relative to their size, not to their spread.
+  f <- unname(as.matrix(f))
+  standardize_matrix(f, apply(abs(f), 2, max))
 }
 
 # twinning --------------------------------------------------------------------
@@ -475,4 +478,18 @@ is_whole_number <- function(x) {
     is.finite(x) &&
     x == round(x) &&
     abs(x) <= .Machine$integer.max
+}
+
+check_flag <- function(
+  x,
+  arg = rlang::caller_arg(x),
+  call = rlang::caller_env()
+) {
+  if (!is_flag(x)) {
+    cli::cli_abort(
+      "{.arg {arg}} must be {.code TRUE} or {.code FALSE}.",
+      call = call
+    )
+  }
+  invisible(x)
 }

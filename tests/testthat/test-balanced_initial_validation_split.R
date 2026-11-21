@@ -344,3 +344,19 @@ test_that("twinning calibration splits use the nearest share twinning can make",
     expect_equal(nrow(rsample::calibration(cal)), 0)
   }
 })
+
+test_that("print shows the method and the columns", {
+  d <- sim_data()
+  withr::local_options(width = 100)
+  set.seed(1)
+  s <- balanced_initial_validation_split(d, balance = x1, exact = sex)
+  out <- utils::capture.output(printed <- print(s))
+  expect_equal(
+    out[1:2],
+    c(
+      "# Balanced training/validation/testing split (anticlust), balancing x1, stratified by sex",
+      "<Training/Validation/Testing/Total>"
+    )
+  )
+  expect_identical(printed, s)
+})

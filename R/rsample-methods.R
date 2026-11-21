@@ -152,32 +152,49 @@ balanced_calibration_split <- function(
   class,
   share = function(args) args$prop
 ) {
+  # Warnings are held back and given once the split is made or has failed,
+  # so that options(warn = 2) doesn't turn them into a failed split. They
+  # come in their original order, before the fallback warning.
+  warnings <- list()
   split <- tryCatch(
-    {
-      options <- split_args$options %||% list()
-      # The inner split is a balanced_initial_split(), which doesn't take
-      # `strategy`. It also rejects options that aren't a list.
-      if (is.list(options)) {
-        options$strategy <- NULL
+    withCallingHandlers(
+      {
+        options <- split_args$options %||% list()
+        # The inner split is a balanced_initial_split(), which doesn't take
+        # `strategy`. It also rejects options that aren't a list.
+        if (is.list(options)) {
+          options$strategy <- NULL
+        }
+        balanced_initial_split(
+          analysis_set,
+          prop = share(split_args),
+          balance = tidyselect::all_of(split_args$balance %||% character()),
+          exact = tidyselect::all_of(split_args$exact %||% character()),
+          group = tidyselect::all_of(split_args$group %||% character()),
+          method = split_args$method %||% "anticlust",
+          options = options
+        )
+      },
+      warning = function(cnd) {
+        warnings[[length(warnings) + 1]] <<- cnd
+        rlang::cnd_muffle(cnd)
       }
-      balanced_initial_split(
-        analysis_set,
-        prop = share(split_args),
-        balance = tidyselect::all_of(split_args$balance %||% character()),
-        exact = tidyselect::all_of(split_args$exact %||% character()),
-        group = tidyselect::all_of(split_args$group %||% character()),
-        method = split_args$method %||% "anticlust",
-        options = options
-      )
-    },
-    error = function(cnd) {
-      cli::cli_warn(
-        "Cannot create calibration split; creating an empty calibration set.",
-        parent = cnd
-      )
-      rsample::make_splits(analysis_set, analysis_set[0, , drop = FALSE])
-    }
+    ),
+    error = identity
   )
+  for (cnd in warnings) {
+    warning(cnd)
+  }
+  if (inherits(split, "error")) {
+    cli::cli_warn(
+      "Cannot create calibration split; creating an empty calibration set.",
+      parent = split
+    )
+    split <- rsample::make_splits(
+      analysis_set,
+      analysis_set[0, , drop = FALSE]
+    )
+  }
   class(split) <- class
   split
 }
