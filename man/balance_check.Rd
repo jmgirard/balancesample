@@ -86,8 +86,14 @@ error of zero counts as zero: if both are zero, the ratio is 1, and if one
 is, it is 0 or \code{Inf}. With fewer than two values in a set, it is \code{NA}.
 
 Missing values are dropped variable by variable for the SMD and the
-variance ratio. The energy
-distance uses the rows that have no missing values in any checked column.
+variance ratio. A variable with missing values also gets an SMD for the
+share of its values that are missing, with \code{level} \code{"(missing)"}. This
+row counts towards the largest SMD in \code{summary()}. The energy distance
+uses all rows. It encodes missing values as the split functions do with
+\code{na = "include"}: a numeric variable gets the mean of its observed values
+plus an indicator of which values are missing, and a categorical variable
+gets a level for them. So with missing values, it compares the encoded
+data, not only the observed values.
 
 The energy distance is the V-statistic
 \verb{2 E|X - Y| - E|X - X'| - E|Y - Y'|} on the standardized variables (one

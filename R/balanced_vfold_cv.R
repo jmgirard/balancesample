@@ -30,6 +30,10 @@
 #' @param method The balancing method: `"anticlust"`, `"twinning"`,
 #'   `"rerandomize"`, or `"interaction"`. See Details.
 #' @param options A named list of options for the method. See Details.
+#' @param na What to do with missing values in the `balance` and `exact`
+#'   columns. `"error"` (the default) stops with an error. `"include"`
+#'   balances on which values are missing; see Missing values. The `group`
+#'   column must not have missing values either way.
 #' @param ... Not used. Must be empty.
 #'
 #' @details
@@ -95,6 +99,37 @@
 #' follows the target proportions, so the number of rows per set is only
 #' approximate. `exact` columns must be constant within each group.
 #'
+#' # Missing values
+#'
+#' With `na = "include"`, rows with missing values stay in the split, and
+#' the method also balances how often each column is missing. The data in
+#' the split keep their missing values, so your model can handle them its
+#' own way, for example with a recipe.
+#'
+#' * In a numeric, logical, `Date`, `POSIXct`, or `difftime` column in
+#'   `balance`, missing values get the mean of the observed values, and an
+#'   indicator column of which values are missing is balanced too. With the
+#'   share missing balanced, balancing the filled column also balances the
+#'   mean of the observed values. The filled values all sit at the mean, so
+#'   the spread of the observed values is balanced less closely.
+#' * In a factor or character column in `balance`, a missing value is one
+#'   more level.
+#' * In `exact`, a missing value is one more level, so the rows with a
+#'   missing value in a column are spread over the sets by exact counts like
+#'   any other stratum. With `group`, a missing value counts as a level when
+#'   `exact` columns are checked for being constant within each group, so a
+#'   group with some rows at site "A" and some with a missing site is an
+#'   error.
+#'
+#' Each indicator column is standardized like the other columns. When few
+#' values are missing, the rows with a missing value are far from the rest
+#' on that column (about 10 standard deviations at 1% missing), as rows of
+#' a rare level are. A column with no observed values is an error.
+#'
+#' Rows with a missing `group` ID could belong to one unit or to several,
+#' so `group` must not have missing values. Give those rows their own IDs,
+#' or one shared ID, depending on which is true.
+#'
 #' # Use with tune
 #'
 #' tune and [rsample::reshuffle_rset()] find the function that made an
@@ -107,8 +142,10 @@
 #' If a workflow has a postprocessor that must be trained, such as a
 #' calibration from the tailor package, tune splits each analysis set again.
 #' That inner split is a [balanced_initial_split()] with the same `balance`,
-#' `exact`, `group`, `method`, and `options` (without twinning's
-#' `strategy`), and with `prop = 1 - 1/v`.
+#' `exact`, `group`, `na`, `method`, and `options` (without twinning's
+#' `strategy`), and with `prop = 1 - 1/v`. With `na = "include"`, a column
+#' with no observed values in the analysis set is left out of the inner
+#' split.
 #'
 #' @return A tibble with class `balanced_vfold_cv` and `rset`. It has a
 #'   `splits` column of `rsplit` objects and one or two ID columns.
@@ -163,6 +200,7 @@ balanced_vfold_cv <- function(
   group = NULL,
   method = "anticlust",
   options = list(),
+  na = "error",
   ...
 ) {
   call <- rlang::current_env()
@@ -176,6 +214,7 @@ balanced_vfold_cv <- function(
     rlang::enquo(balance),
     rlang::enquo(exact),
     rlang::enquo(group),
+    na = na,
     call = call
   )
 
@@ -219,6 +258,7 @@ balanced_vfold_cv <- function(
     balance = prep$balance_names,
     exact = prep$exact_names,
     group = prep$group_name,
+    na = prep$na,
     method = method,
     options = options
   )
@@ -279,6 +319,9 @@ design_parts <- function(details) {
   }
   if (length(details$group) > 0) {
     res <- c(res, paste("grouped by", details$group))
+  }
+  if (identical(details$na, "include")) {
+    res <- c(res, "missing values included")
   }
   res
 }

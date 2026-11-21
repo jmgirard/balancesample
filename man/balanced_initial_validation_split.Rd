@@ -12,6 +12,7 @@ balanced_initial_validation_split(
   group = NULL,
   method = "anticlust",
   options = list(),
+  na = "error",
   ...
 )
 }
@@ -52,6 +53,11 @@ IDs. All rows of a group go to the same set. See Details.}
 \code{"rerandomize"}, or \code{"interaction"}. See Details.}
 
 \item{options}{A named list of options for the method. See Details.}
+
+\item{na}{What to do with missing values in the \code{balance} and \code{exact}
+columns. \code{"error"} (the default) stops with an error. \code{"include"}
+balances on which values are missing; see Missing values. The \code{group}
+column must not have missing values either way.}
 
 \item{...}{Not used. Must be empty.}
 }

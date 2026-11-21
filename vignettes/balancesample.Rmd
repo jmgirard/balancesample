@@ -121,30 +121,48 @@ The smallest stratum is `r rownames(tab)[small[1]]` cases at site `r colnames(ta
 
 ### Missing values
 
-The columns in `balance`, `exact`, and `group` must not have missing values. If a `balance` column has some, you can balance on a filled copy of it and on an indicator of which values were missing. Here, 30 incomes are missing. The median fills them, and `income_missing` makes sure the missing incomes are spread over the folds too:
+By default, the columns in `balance`, `exact`, and `group` must not have missing values. With `na = "include"`, the rows with missing values stay in, and the method also balances which values are missing. Here, 30 incomes and 15 sites are missing:
 
 ```{r missing}
 d_na <- d
 d_na$income[sample(n, 30)] <- NA
-d_na$income_filled <- d_na$income
-d_na$income_filled[is.na(d_na$income)] <- median(d_na$income, na.rm = TRUE)
-d_na$income_missing <- is.na(d_na$income)
+d_na$site[sample(n, 15)] <- NA
 folds_na <- balanced_vfold_cv(
   d_na,
   v = 10,
-  balance = c(age, income_filled, income_missing),
-  exact = c(diagnosis, site)
+  balance = c(age, income),
+  exact = c(diagnosis, site),
+  na = "include"
 )
 ```
 
-The filled copy is only for making the split. Your model can handle the missing values its own way, for example with a recipe. `balance_check()` drops missing values variable by variable, so you can check the original column:
+Each column type is handled in its own way:
+
+- In a numeric `balance` column such as income, the missing values get the mean of the observed values, and a 0/1 column of which values are missing is balanced too. Once the share missing is balanced, balancing the filled column also balances the mean of the observed incomes. The filled values all sit at the mean, so the spread of the observed incomes is balanced less closely.
+- In a categorical `balance` column, a missing value is one more level.
+- In an `exact` column such as site, a missing value is one more level too, so the 15 rows are spread over the folds by exact counts. With `group`, a group with some rows at site A and some with a missing site is an error, because a missing value counts as a level of its own.
+
+These encodings are used only to make the split. The data in the folds keep their missing values, so your model can handle them its own way, for example with a recipe.
+
+`balance_check()` adds a row with `level` `"(missing)"` for each column with missing values. It gives the SMD of the share of values that are missing, and it counts towards the largest SMD in `summary()`. The other SMDs use the observed values only. The energy distance uses all rows, encoded as above.
 
 ```{r missing-check}
-na_check <- balance_check(folds_na, age, income, income_missing)
+na_check <- balance_check(folds_na)
+na_rows <- tibble::as_tibble(na_check)
+head(na_rows[na_rows$level %in% "(missing)", ], 4)
 summary(na_check)
 ```
 
-For a categorical column, you can instead make a copy with its own level for missing values, for example with `forcats::fct_na_value_to_level()`, and put that in `balance` or `exact`.
+A column with no observed values is an error. A `group` column must not have missing values even with `na = "include"`, because rows with a missing ID could come from one unit or from several. Give them their own IDs, or one shared ID, depending on which is true. For a character ID column `id`:
+
+```{r missing-group, eval = FALSE}
+# One group per row with a missing ID
+d$id[is.na(d$id)] <- paste0("unknown_", seq_len(sum(is.na(d$id))))
+# Or one group for all of them
+d$id[is.na(d$id)] <- "unknown"
+```
+
+To fill in another way, for example with the median, make the filled copy and the 0/1 column yourself and put both in `balance`.
 
 ## A full tidymodels workflow
 

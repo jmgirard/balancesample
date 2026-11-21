@@ -67,12 +67,55 @@ test_that("balance_check() works on repeats and on splits", {
   expect_match(utils::capture.output(print(bc))[1], ",$")
 })
 
-test_that("balance_check() drops missing values", {
+test_that("balance_check() drops missing values and reports the share missing", {
   d <- data.frame(z = c(1, 2, 3, NA, 5, 6), w = c("a", NA, "b", "a", "b", "a"))
   s <- rsample::make_splits(list(analysis = 1:3, assessment = 4:6), d)
   bc <- balance_check(s, z, w)
-  expect_equal(bc$value[bc$variable %in% "z"], (5.5 - 2) / sqrt((0.5 + 1) / 2))
+  smd <- bc$statistic == "smd"
+  expect_equal(
+    bc$value[smd & bc$variable %in% "z" & is.na(bc$level)],
+    (5.5 - 2) / sqrt((0.5 + 1) / 2)
+  )
+  expect_equal(bc$level[bc$variable %in% "w"], c("a", "b", "(missing)"))
+  # z is missing in 1 of 3 assessment rows and in no analysis row; w the
+  # other way round.
+  missing <- bc$value[bc$level %in% "(missing)"]
+  expect_equal(missing, c(1, -1))
   expect_false(anyNA(bc$value))
+})
+
+test_that("the energy distance uses all rows when values are missing", {
+  set.seed(1)
+  n <- 200
+  d <- data.frame(x = rnorm(n), y = rnorm(n))
+  # Every row has a missing value, so no row is complete.
+  d$x[seq(1, n, 2)] <- NA
+  d$y[seq(2, n, 2)] <- NA
+  split <- rsample::initial_split(d)
+  en <- balance_check(split, x, y)
+  en <- en$value[en$statistic == "energy"]
+  expect_true(is.finite(en) && en > 0)
+
+  # The same encoding as the split functions: filled values and indicators.
+  xs <- build_balance_matrix(d)
+  expect_equal(
+    en,
+    energy_distance(
+      xs[rsample::complement(split), ],
+      xs[split$in_id, ]
+    )
+  )
+
+  # With no missing values, nothing changes.
+  d <- data.frame(x = rnorm(n), g = sample(letters[1:3], n, TRUE))
+  split <- rsample::initial_split(d)
+  bc <- balance_check(split, x, g)
+  xs <- build_balance_matrix(d)
+  expect_equal(
+    bc$value[bc$statistic == "energy"],
+    energy_distance(xs[rsample::complement(split), ], xs[split$in_id, ])
+  )
+  expect_false(any(bc$level %in% "(missing)"))
 })
 
 test_that("balance_check() reports complete separation as Inf", {
@@ -137,9 +180,12 @@ test_that("balance_check() handles logical and missing columns", {
   s <- rsample::make_splits(list(analysis = 1:3, assessment = 4:6), d)
   bc <- balance_check(s, flag, z)
   expect_equal(bc$level[bc$variable %in% "flag"], c("FALSE", "TRUE"))
-  # z is missing in the whole analysis set, so no row there is complete.
-  expect_true(is.na(bc$value[bc$variable %in% "z"]))
-  expect_true(is.na(bc$value[bc$statistic == "energy"]))
+  # z is missing in the whole analysis set, so it has no SMD of its values,
+  # and its share missing differs completely.
+  z <- bc$variable %in% "z"
+  expect_true(is.na(bc$value[z & is.na(bc$level)]))
+  expect_equal(bc$value[z & bc$level %in% "(missing)"], -Inf)
+  expect_true(is.finite(bc$value[bc$statistic == "energy"]))
 })
 
 test_that("balance_check() subsamples large sets for the energy distance", {
@@ -225,13 +271,21 @@ test_that("summary() handles splits, three-way splits, and missing SMDs", {
     g = c("a", "b", "a", "b", "a", "b")
   )
   s <- rsample::make_splits(list(analysis = 1:3, assessment = 4:6), d)
-  out <- summary(balance_check(s, z))
+  # z has no observed value in the analysis set, so its only SMD that
+  # isn't missing is the one of its share missing.
+  bc <- balance_check(s, z)
+  out <- summary(bc[!bc$level %in% "(missing)", ])
   expect_equal(out$id, "Split")
   expect_true(is.na(out$max_abs_smd))
   expect_true(is.na(out$variable))
-  expect_true(is.na(out$energy))
+  out <- summary(bc)
+  expect_equal(out$variable, "z")
+  expect_equal(out$level, "(missing)")
+  expect_equal(out$max_abs_smd, Inf)
+  bc$value[bc$statistic == "energy"] <- NA
+  expect_true(is.na(summary(bc)$energy))
 
-  out <- summary(balance_check(s, z, g))
+  out <- summary(balance_check(s, g))
   expect_equal(out$variable, "g")
   # The two levels of g tie, and the first one is kept.
   expect_equal(out$level, "a")
@@ -489,4 +543,24 @@ test_that("every split of an rset must have the columns to check", {
   )
   r <- rsample::manual_rset(list(a, b), c("A", "B"))
   expect_snapshot(balance_check(r, x), error = TRUE)
+})
+
+test_that("logical exact columns are checked as categories", {
+  set.seed(3)
+  d <- data.frame(
+    flag = rep(c(FALSE, TRUE, NA), c(11, 12, 10)),
+    x = rnorm(33)
+  )
+  split <- balanced_initial_split(d, balance = x, exact = flag, na = "include")
+  bc <- balance_check(split)
+  expect_equal(
+    bc$level[bc$variable %in% "flag"],
+    c("FALSE", "TRUE", "(missing)")
+  )
+  as_factor <- rsample::make_splits(
+    list(analysis = split$in_id, assessment = rsample::complement(split)),
+    transform(d, flag = factor(flag))
+  )
+  energy <- function(bc) bc$value[bc$statistic == "energy"]
+  expect_equal(energy(bc), energy(balance_check(as_factor, x, flag)))
 })

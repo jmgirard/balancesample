@@ -123,8 +123,7 @@ assign_balanced <- function(
       prep$exact,
       prep$group,
       props,
-      run,
-      call = call
+      run
     )
   } else {
     sizes <- sizes_from_props(nrow(prep$x), props)

@@ -13,6 +13,7 @@ balanced_vfold_cv(
   group = NULL,
   method = "anticlust",
   options = list(),
+  na = "error",
   ...
 )
 }
@@ -50,6 +51,11 @@ IDs. All rows of a group go to the same set. See Details.}
 \code{"rerandomize"}, or \code{"interaction"}. See Details.}
 
 \item{options}{A named list of options for the method. See Details.}
+
+\item{na}{What to do with missing values in the \code{balance} and \code{exact}
+columns. \code{"error"} (the default) stops with an error. \code{"include"}
+balances on which values are missing; see Missing values. The \code{group}
+column must not have missing values either way.}
 
 \item{...}{Not used. Must be empty.}
 }
@@ -128,6 +134,38 @@ follows the target proportions, so the number of rows per set is only
 approximate. \code{exact} columns must be constant within each group.
 }
 
+\section{Missing values}{
+With \code{na = "include"}, rows with missing values stay in the split, and
+the method also balances how often each column is missing. The data in
+the split keep their missing values, so your model can handle them its
+own way, for example with a recipe.
+\itemize{
+\item In a numeric, logical, \code{Date}, \code{POSIXct}, or \code{difftime} column in
+\code{balance}, missing values get the mean of the observed values, and an
+indicator column of which values are missing is balanced too. With the
+share missing balanced, balancing the filled column also balances the
+mean of the observed values. The filled values all sit at the mean, so
+the spread of the observed values is balanced less closely.
+\item In a factor or character column in \code{balance}, a missing value is one
+more level.
+\item In \code{exact}, a missing value is one more level, so the rows with a
+missing value in a column are spread over the sets by exact counts like
+any other stratum. With \code{group}, a missing value counts as a level when
+\code{exact} columns are checked for being constant within each group, so a
+group with some rows at site "A" and some with a missing site is an
+error.
+}
+
+Each indicator column is standardized like the other columns. When few
+values are missing, the rows with a missing value are far from the rest
+on that column (about 10 standard deviations at 1\% missing), as rows of
+a rare level are. A column with no observed values is an error.
+
+Rows with a missing \code{group} ID could belong to one unit or to several,
+so \code{group} must not have missing values. Give those rows their own IDs,
+or one shared ID, depending on which is true.
+}
+
 \section{Use with tune}{
 tune and \code{\link[rsample:reshuffle_rset]{rsample::reshuffle_rset()}} find the function that made an
 \code{rset} by its class name. They only find \code{balanced_vfold_cv()} when
@@ -139,8 +177,10 @@ function".
 If a workflow has a postprocessor that must be trained, such as a
 calibration from the tailor package, tune splits each analysis set again.
 That inner split is a \code{\link[=balanced_initial_split]{balanced_initial_split()}} with the same \code{balance},
-\code{exact}, \code{group}, \code{method}, and \code{options} (without twinning's
-\code{strategy}), and with \code{prop = 1 - 1/v}.
+\code{exact}, \code{group}, \code{na}, \code{method}, and \code{options} (without twinning's
+\code{strategy}), and with \code{prop = 1 - 1/v}. With \code{na = "include"}, a column
+with no observed values in the analysis set is left out of the inner
+split.
 }
 
 \examples{

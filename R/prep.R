@@ -5,8 +5,10 @@ prepare_balance_data <- function(
   balance,
   exact,
   group,
+  na = "error",
   call = rlang::caller_env()
 ) {
+  na <- rlang::arg_match(na, c("error", "include"), error_call = call)
   if (!is.data.frame(data)) {
     cli::cli_abort(
       "{.arg data} must be a data frame, not {.obj_type_friendly {data}}.",
@@ -77,26 +79,14 @@ prepare_balance_data <- function(
       call = call
     )
   }
-  n_na <- vapply(data[used], function(v) sum(is.na(v)), integer(1))
-  if (any(n_na > 0)) {
-    n <- n_na[n_na > 0]
-    has_na <- paste0(names(n), " (", n, ifelse(n == 1, " row)", " rows)"))
-    cli::cli_abort(
-      c(
-        "Selected columns must not have missing values.",
-        x = "Missing values in {has_na}.",
-        i = "Drop those rows, or balance on a filled copy of the column and an indicator of which values were missing. See {.code vignette(\"balancesample\")}."
-      ),
-      call = call
-    )
-  }
+  check_missing(data, bal_pos, exa_pos, grp_pos, na, call = call)
 
   for (nm in names(exa_pos)) {
     col <- data[[nm]]
-    if (is.numeric(col) && any(!is.finite(col))) {
+    if (is.numeric(col) && any(is.infinite(col))) {
       cli::cli_abort("{.field {nm}} has infinite values.", call = call)
     }
-    whole <- is.numeric(col) && all(col == round(col))
+    whole <- is.numeric(col) && all(col == round(col), na.rm = TRUE)
     if (!(is.factor(col) || is.character(col) || is.logical(col) || whole)) {
       cli::cli_abort(
         c(
@@ -117,6 +107,9 @@ prepare_balance_data <- function(
   if (length(grp_pos) == 1) {
     group_fct <- factor(data[[grp_pos]])
   }
+  if (!is.null(exact_fct) && !is.null(group_fct)) {
+    check_exact_in_groups(exact_fct, group_fct, data[exa_pos], call = call)
+  }
 
   list(
     x = build_balance_matrix(data[bal_pos], call = call),
@@ -125,21 +118,112 @@ prepare_balance_data <- function(
     balance_names = names(bal_pos),
     exact_names = names(exa_pos),
     exact_numeric = vapply(data[exa_pos], is.numeric, logical(1)),
-    group_name = names(grp_pos)
+    group_name = names(grp_pos),
+    na = na
+  )
+}
+
+# With `na = "error"`, no selected column may have missing values. With
+# `na = "include"`, `balance` and `exact` columns may, as long as each has an
+# observed value. `group` never may: rows with a missing ID may or may not
+# belong together, and only the user knows which.
+check_missing <- function(data, bal_pos, exa_pos, grp_pos, na, call) {
+  used <- unique(c(bal_pos, exa_pos, grp_pos))
+  n_na <- vapply(data[used], function(v) sum(is.na(v)), integer(1))
+  if (!any(n_na > 0)) {
+    return(invisible())
+  }
+  group_hint <- if (length(grp_pos) == 1 && n_na[[names(grp_pos)]] > 0) {
+    "{.arg group} can't have missing values. Give the rows with a missing ID their own IDs, or one shared ID, depending on whether they can belong together."
+  }
+  if (na == "error") {
+    n <- n_na[n_na > 0]
+    has_na <- paste0(names(n), " (", n, ifelse(n == 1, " row)", " rows)"))
+    cli::cli_abort(
+      c(
+        "Selected columns must not have missing values.",
+        x = "Missing values in {has_na}.",
+        i = if (any(n[setdiff(names(n), names(grp_pos))] > 0)) {
+          "Use {.code na = \"include\"} to balance on which values are missing, or drop those rows. See {.code vignette(\"balancesample\")}."
+        },
+        i = group_hint
+      ),
+      call = call
+    )
+  }
+  if (!is.null(group_hint)) {
+    n <- n_na[[names(grp_pos)]]
+    cli::cli_abort(
+      c(
+        "{.arg group} must not have missing values.",
+        x = "{.field {names(grp_pos)}} is missing in {n} row{?s}.",
+        i = "Give the rows with a missing ID their own IDs, or one shared ID, depending on whether they can belong together."
+      ),
+      call = call
+    )
+  }
+  empty <- names(n_na)[n_na == nrow(data)]
+  if (length(empty) > 0) {
+    cli::cli_abort(
+      c(
+        "{.arg balance} and {.arg exact} columns must have at least one observed value.",
+        x = "{.field {empty}} {?is/are} missing in every row."
+      ),
+      call = call
+    )
+  }
+  invisible()
+}
+
+# `exact` columns must be constant within each group, so that each group has
+# one stratum. A missing value counts as its own level.
+check_exact_in_groups <- function(exact, group, exact_cols, call) {
+  g <- as.integer(group)
+  n_lvl <- vapply(
+    split(as.integer(exact), g),
+    function(z) length(unique(z)),
+    integer(1)
+  )
+  if (all(n_lvl <= 1)) {
+    return(invisible())
+  }
+  # Does a group that fails have both missing and observed values in some
+  # column?
+  mixed_na <- any(vapply(
+    exact_cols,
+    function(v) {
+      some <- tapply(is.na(v), g, function(z) any(z) && !all(z))
+      any(some[n_lvl > 1])
+    },
+    logical(1)
+  ))
+  cli::cli_abort(
+    c(
+      "{.arg exact} columns must be constant within each group.",
+      x = "{sum(n_lvl > 1)} group{?s} contain{?s/} more than one {.arg exact} level.",
+      i = if (mixed_na) {
+        "A missing value counts as its own level. Fill it in where you know the group's value."
+      }
+    ),
+    call = call
   )
 }
 
 # One factor level per observed combination of the columns in `cols`. The key
 # is built from integer codes, so level labels that contain the separator
-# can't make two combinations collide.
+# can't make two combinations collide. A missing value gets a code of its own.
 combine_levels <- function(cols) {
-  codes <- lapply(cols, function(v) as.integer(as.factor(v)))
+  codes <- lapply(cols, function(v) {
+    as.integer(addNA(as.factor(v), ifany = TRUE))
+  })
   factor(do.call(paste, c(unname(codes), sep = "_")))
 }
 
 # Numeric matrix with one standardized column per numeric variable and one
 # standardized indicator column per level of each categorical variable.
-# Constant columns are dropped.
+# Missing categorical values get an indicator column of their own. Missing
+# numeric values get the mean of the observed values, and an indicator
+# column marks them. Constant columns are dropped.
 build_balance_matrix <- function(df, call = rlang::caller_env()) {
   n <- nrow(df)
   if (ncol(df) == 0) {
@@ -155,20 +239,36 @@ build_balance_matrix <- function(df, call = rlang::caller_env()) {
     }
     if (is.factor(v)) {
       v <- droplevels(v)
-      m <- outer(as.integer(v), seq_len(nlevels(v)), "==") * 1
-      colnames(m) <- paste0(nm, "_", levels(v))
+      codes <- as.integer(v)
+      lv <- levels(v)
+      if (anyNA(codes)) {
+        codes[is.na(codes)] <- length(lv) + 1L
+        lv <- c(lv, "(missing)")
+      }
+      m <- outer(codes, seq_along(lv), "==") * 1
+      colnames(m) <- paste0(nm, "_", lv)
       return(m)
     }
     v <- as_balance_numeric(v)
     if (is.numeric(v)) {
-      if (any(!is.finite(v))) {
+      if (any(is.infinite(v))) {
         cli::cli_abort("{.field {nm}} has infinite values.", call = call)
+      }
+      v <- as.double(v)
+      miss <- is.na(v)
+      if (all(miss)) {
+        return(matrix(numeric(0), nrow = n, ncol = 0))
       }
       # Measure from an observed value, so that a large origin (such as a
       # date-time in seconds) doesn't swamp small differences.
-      v <- as.double(v)
-      v <- v - v[1]
-      return(matrix(v, ncol = 1, dimnames = list(NULL, nm)))
+      v <- v - v[!miss][1]
+      if (!any(miss)) {
+        return(matrix(v, ncol = 1, dimnames = list(NULL, nm)))
+      }
+      v[miss] <- mean(v[!miss])
+      m <- cbind(v, miss * 1)
+      colnames(m) <- c(nm, paste0(nm, "_(missing)"))
+      return(m)
     }
     cli::cli_abort(
       c(
@@ -225,8 +325,7 @@ assign_grouped <- function(
   exact,
   group,
   props,
-  assign_fun,
-  call = rlang::caller_env()
+  assign_fun
 ) {
   g <- as.integer(group)
   n_grp <- nlevels(group)
@@ -248,20 +347,6 @@ assign_grouped <- function(
 
   exact_g <- NULL
   if (!is.null(exact)) {
-    n_lvl <- vapply(
-      split(as.integer(exact), g),
-      function(z) length(unique(z)),
-      integer(1)
-    )
-    if (any(n_lvl > 1)) {
-      cli::cli_abort(
-        c(
-          "{.arg exact} columns must be constant within each group.",
-          x = "{sum(n_lvl > 1)} group{?s} contain{?s/} more than one {.arg exact} level."
-        ),
-        call = call
-      )
-    }
     first <- match(seq_len(n_grp), g)
     exact_g <- droplevels(exact[first])
   }

@@ -41,6 +41,7 @@ internal_calibration_split.balanced_initial_split <- function(
     "balance",
     "exact",
     "group",
+    "na",
     "method",
     "options"
   )]
@@ -165,12 +166,18 @@ balanced_calibration_split <- function(
         if (is.list(options)) {
           options$strategy <- NULL
         }
+        # A column can have no observed values in a part of the data even
+        # when it has some in the whole. It carries no information there, so
+        # it is left out rather than failing the split.
+        balance <- drop_empty(analysis_set, split_args$balance)
+        exact <- drop_empty(analysis_set, split_args$exact)
         balanced_initial_split(
           analysis_set,
           prop = share(split_args),
-          balance = tidyselect::all_of(split_args$balance %||% character()),
-          exact = tidyselect::all_of(split_args$exact %||% character()),
+          balance = tidyselect::all_of(balance),
+          exact = tidyselect::all_of(exact),
           group = tidyselect::all_of(split_args$group %||% character()),
+          na = split_args$na %||% "error",
           method = split_args$method %||% "anticlust",
           options = options
         )
@@ -197,6 +204,17 @@ balanced_calibration_split <- function(
   }
   class(split) <- class
   split
+}
+
+# The names in `cols` that `data` has, less those with no observed values.
+drop_empty <- function(data, cols) {
+  cols <- cols %||% character()
+  empty <- vapply(
+    cols,
+    function(nm) nm %in% names(data) && all(is.na(data[[nm]])),
+    logical(1)
+  )
+  cols[!empty]
 }
 
 #' @export

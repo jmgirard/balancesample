@@ -121,7 +121,7 @@
       Error in `balanced_vfold_cv()`:
       ! Selected columns must not have missing values.
       x Missing values in x1 (1 row).
-      i Drop those rows, or balance on a filled copy of the column and an indicator of which values were missing. See `vignette("balancesample")`.
+      i Use `na = "include"` to balance on which values are missing, or drop those rows. See `vignette("balancesample")`.
 
 ---
 

@@ -43,8 +43,14 @@
 #' is, it is 0 or `Inf`. With fewer than two values in a set, it is `NA`.
 #'
 #' Missing values are dropped variable by variable for the SMD and the
-#' variance ratio. The energy
-#' distance uses the rows that have no missing values in any checked column.
+#' variance ratio. A variable with missing values also gets an SMD for the
+#' share of its values that are missing, with `level` `"(missing)"`. This
+#' row counts towards the largest SMD in `summary()`. The energy distance
+#' uses all rows. It encodes missing values as the split functions do with
+#' `na = "include"`: a numeric variable gets the mean of its observed values
+#' plus an indicator of which values are missing, and a categorical variable
+#' gets a level for them. So with missing values, it compares the encoded
+#' data, not only the observed values.
 #'
 #' The energy distance is the V-statistic
 #' `2 E|X - Y| - E|X - X'| - E|Y - Y'|` on the standardized variables (one
@@ -214,11 +220,13 @@ stored_args <- function(x) {
   attr(x, "val_att") %||% attributes(x)
 }
 
-# The split functions treat whole-number `exact` columns as categories, so
-# the check does too, with one SMD per level.
+# The split functions treat whole-number and logical `exact` columns as
+# categories, so the check does too, with one SMD per level. The energy
+# distance then gives missing values a level, as the split does, instead of
+# a fill and an indicator.
 exact_as_factors <- function(data, x, cols) {
   for (nm in intersect(cols, stored_args(x)$exact)) {
-    if (is.numeric(data[[nm]])) {
+    if (is.numeric(data[[nm]]) || is.logical(data[[nm]])) {
       data[[nm]] <- factor(data[[nm]])
     }
   }
@@ -236,62 +244,30 @@ split_balance <- function(
   as <- rsample::complement(split)
 
   smd <- lapply(cols, function(nm) {
-    v <- data[[nm]]
-    if (is.logical(v)) {
-      v <- factor(v, levels = c(FALSE, TRUE))
-    }
-    if (is.character(v)) {
-      v <- factor(v)
-    }
-    if (is.factor(v)) {
-      lv <- levels(droplevels(v))
-      vals <- vapply(
-        lv,
-        function(l) {
-          z <- as.numeric(v == l)
-          smd_value(z[as], z[an], binary = TRUE)
-        },
-        numeric(1)
-      )
-      return(tibble::tibble(
-        variable = nm,
-        level = lv,
-        statistic = "smd",
-        value = unname(vals)
-      ))
-    }
-    v <- as.numeric(as_balance_numeric(v))
-    out <- tibble::tibble(
-      variable = nm,
-      level = NA_character_,
-      statistic = "smd",
-      value = smd_value(v[as], v[an])
-    )
-    if (variance_ratio) {
+    out <- variable_balance(data[[nm]], nm, an, as, variance_ratio)
+    miss <- is.na(data[[nm]])
+    if (any(miss)) {
       out <- rbind(
         out,
         tibble::tibble(
           variable = nm,
-          level = NA_character_,
-          statistic = "variance_ratio",
-          value = variance_ratio_value(v[as], v[an])
+          level = "(missing)",
+          statistic = "smd",
+          value = smd_value(miss[as] * 1, miss[an] * 1, binary = TRUE)
         )
       )
     }
     out
   })
 
-  keep <- which(stats::complete.cases(data[cols]))
-  pos <- integer(nrow(data))
-  pos[keep] <- seq_along(keep)
-  as_k <- pos[as][pos[as] > 0]
-  an_k <- pos[an][pos[an] > 0]
+  # The energy distance uses all rows, encoded as the split functions
+  # encode them, so that missing values count too.
   en <- NA_real_
-  if (length(as_k) > 0 && length(an_k) > 0) {
-    xs <- build_balance_matrix(data[keep, cols, drop = FALSE])
+  if (length(as) > 0 && length(an) > 0) {
+    xs <- build_balance_matrix(data[cols])
     en <- energy_distance(
-      xs[as_k, , drop = FALSE],
-      xs[an_k, , drop = FALSE],
+      xs[as, , drop = FALSE],
+      xs[an, , drop = FALSE],
       max_n
     )
   }
@@ -302,6 +278,52 @@ split_balance <- function(
     value = en
   )
   do.call(rbind, c(smd, list(energy)))
+}
+
+# SMDs (and variance ratios) of one variable, from its observed values.
+variable_balance <- function(v, nm, an, as, variance_ratio) {
+  if (is.logical(v)) {
+    v <- factor(v, levels = c(FALSE, TRUE))
+  }
+  if (is.character(v)) {
+    v <- factor(v)
+  }
+  if (is.factor(v)) {
+    lv <- levels(droplevels(v))
+    vals <- vapply(
+      lv,
+      function(l) {
+        z <- as.numeric(v == l)
+        smd_value(z[as], z[an], binary = TRUE)
+      },
+      numeric(1)
+    )
+    return(tibble::tibble(
+      variable = nm,
+      level = lv,
+      statistic = "smd",
+      value = unname(vals)
+    ))
+  }
+  v <- as.numeric(as_balance_numeric(v))
+  out <- tibble::tibble(
+    variable = nm,
+    level = NA_character_,
+    statistic = "smd",
+    value = smd_value(v[as], v[an])
+  )
+  if (variance_ratio) {
+    out <- rbind(
+      out,
+      tibble::tibble(
+        variable = nm,
+        level = NA_character_,
+        statistic = "variance_ratio",
+        value = variance_ratio_value(v[as], v[an])
+      )
+    )
+  }
+  out
 }
 
 smd_value <- function(a, b, binary = FALSE) {

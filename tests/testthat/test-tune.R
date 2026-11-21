@@ -377,3 +377,67 @@ test_that("warnings before a failed calibration split come first", {
   expect_length(order, 2)
   expect_equal(nrow(rsample::calibration(cal)), 0)
 })
+
+test_that("calibration splits keep na = \"include\"", {
+  d <- sim_data()
+  d$x1[1:20] <- NA
+  d$sex[21:30] <- NA
+
+  set.seed(7)
+  folds <- balanced_vfold_cv(
+    d,
+    v = 4,
+    balance = x1,
+    exact = sex,
+    na = "include"
+  )
+  args <- rsample::.get_split_args(folds)
+  expect_identical(args$na, "include")
+  cal <- rsample::internal_calibration_split(folds$splits[[1]], args)
+  expect_identical(attr(cal, "na"), "include")
+  expect_gt(nrow(rsample::calibration(cal)), 0)
+
+  set.seed(7)
+  split <- balanced_initial_split(d, balance = x1, exact = sex, na = "include")
+  # tune::last_fit() passes no split arguments.
+  cal <- rsample::internal_calibration_split(split, split_args = list())
+  expect_identical(attr(cal, "na"), "include")
+  expect_gt(nrow(rsample::calibration(cal)), 0)
+
+  set.seed(7)
+  split3 <- balanced_initial_validation_split(
+    d,
+    balance = x1,
+    exact = sex,
+    na = "include"
+  )
+  cal <- rsample::internal_calibration_split(split3, split_args = list())
+  expect_identical(attr(cal, "na"), "include")
+  expect_gt(nrow(rsample::calibration(cal)), 0)
+})
+
+test_that("calibration splits leave out columns with no observed values", {
+  d <- sim_data()
+  d$z <- NA_real_
+  d$z[1:5] <- 1:5
+  d$s <- NA_character_
+  d$s[1:5] <- "a"
+  split <- rsample::make_splits(list(analysis = 6:200, assessment = 1:5), d)
+  args <- list(
+    balance = c("x1", "z"),
+    exact = c("sex", "s"),
+    na = "include",
+    prop = 3 / 4
+  )
+  set.seed(8)
+  expect_no_warning(
+    cal <- balanced_calibration_split(
+      rsample::analysis(split),
+      args,
+      class = class(split)
+    )
+  )
+  expect_identical(attr(cal, "balance"), "x1")
+  expect_identical(attr(cal, "exact"), "sex")
+  expect_gt(nrow(rsample::assessment(cal)), 0)
+})
